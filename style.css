@@ -3139,6 +3139,72 @@
     padding: 8px 4px;
 }
 
+/* Small + Compact is the dense toolbar preset. Keep these values after the
+   responsive rules so the mobile 32px touch-target defaults cannot override it. */
+.pw_action_bar.pw_font_small.pw_height_compact {
+    min-height: 30px;
+    height: 30px;
+    padding: 2px 4px;
+    gap: 2px;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn {
+    width: 25px;
+    height: 25px;
+    min-width: 25px;
+    min-height: 25px;
+    margin: 0 2px;
+    padding: 0;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn i,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn i,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn i {
+    font-size: 10px;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact #pw_bar_settings {
+    width: 23px;
+    height: 23px;
+    min-width: 23px;
+    min-height: 23px;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact .pw_category_buttons {
+    gap: 2px;
+}
+
+@media (max-width: 768px) {
+    .pw_action_bar.pw_font_small.pw_height_compact {
+        min-height: 28px;
+        height: 28px;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn {
+        width: 24px !important;
+        height: 24px !important;
+        min-width: 24px;
+        min-height: 24px;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact #pw_bar_settings {
+        width: 22px !important;
+        height: 22px !important;
+        min-width: 22px;
+        min-height: 22px;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn i,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn i,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn i {
+        font-size: 11px;
+    }
+}
+
 .pw_dropdown_menu.pw_icon_only .pw_dropdown_item span {
     display: none;
 }
