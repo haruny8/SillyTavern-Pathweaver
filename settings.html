@@ -148,13 +148,8 @@
                         <label for="pw_context_depth" class="pw_input_label">
                             <i class="fa-solid fa-layer-group"></i> Context
                         </label>
-                        <select id="pw_context_depth" class="text_pole pw_select">
-                            <option value="2">2 messages</option>
-                            <option value="4">4 messages</option>
-                            <option value="6">6 messages</option>
-                            <option value="8">8 messages</option>
-                            <option value="10">10 messages</option>
-                        </select>
+                        <input id="pw_context_depth" type="number" class="text_pole" min="1" max="500" step="1"
+                            value="4" title="Number of recent chat messages to include as context">
                     </div>
                 </div>
 
@@ -181,6 +176,15 @@
                 <p class="pw_setting_hint" style="margin: 4px 0 0 0; font-size: 0.8rem; opacity: 0.85;">
                     Cards appear as each suggestion is generated. Works with Ollama and OpenAI-compatible APIs;
                     Connection Profile may also support streaming.
+                </p>
+
+                <label class="checkbox_label pw_checkbox_row" for="pw_prompt_for_user_suggestions" style="margin-top: 12px;">
+                    <input id="pw_prompt_for_user_suggestions" type="checkbox" class="checkbox"
+                        title="Ask for optional guidance before generating suggestions">
+                    <span><i class="fa-solid fa-lightbulb"></i> Ask for guidance before generating</span>
+                </label>
+                <p class="pw_setting_hint" style="margin: 4px 0 0 0; font-size: 0.8rem; opacity: 0.85;">
+                    Opens an optional note field before every suggestion style. Leave it blank to generate normally.
                 </p>
 
                 <!-- Reasoning Mode Settings -->
@@ -225,6 +229,16 @@
                 <label class="checkbox_label pw_checkbox_row" for="pw_include_description">
                     <input id="pw_include_description" type="checkbox" class="checkbox">
                     <span><i class="fa-solid fa-user"></i> Include Character Description</span>
+                </label>
+
+                <label class="checkbox_label pw_checkbox_row" for="pw_include_persona">
+                    <input id="pw_include_persona" type="checkbox" class="checkbox">
+                    <span><i class="fa-solid fa-id-card"></i> Include Your Persona</span>
+                </label>
+
+                <label class="checkbox_label pw_checkbox_row" for="pw_include_authors_note">
+                    <input id="pw_include_authors_note" type="checkbox" class="checkbox">
+                    <span><i class="fa-solid fa-note-sticky"></i> Include Author's Note</span>
                 </label>
 
                 <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 5px;">
@@ -391,6 +405,24 @@
                         </optgroup>
                     </select>
                 </div>
+
+                <div class="pw_row_2col" style="margin-top: 10px;">
+                    <label class="checkbox_label pw_checkbox_row" for="pw_show_director_btn">
+                        <input id="pw_show_director_btn" type="checkbox" class="checkbox">
+                        <span><i class="fa-solid fa-clapperboard"></i> Show Director button</span>
+                    </label>
+                    <label class="checkbox_label pw_checkbox_row" for="pw_show_surprise_btn">
+                        <input id="pw_show_surprise_btn" type="checkbox" class="checkbox">
+                        <span><i class="fa-solid fa-wand-sparkles"></i> Show Surprise Me button</span>
+                    </label>
+                </div>
+
+                <label class="checkbox_label pw_checkbox_row" for="pw_icon_only_dropdowns"
+                    style="margin-top: 6px;">
+                    <input id="pw_icon_only_dropdowns" type="checkbox" class="checkbox">
+                    <span><i class="fa-solid fa-icons"></i> Icon-only Genre/Custom/Surprise menus (hover for
+                        name)</span>
+                </label>
             </div>
 
         </div>

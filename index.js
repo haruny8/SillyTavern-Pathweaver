@@ -120,10 +120,17 @@
         bar_title_font: 'default',  // 'none' (hidden) | 'default' | 'crimson'|'georgia'|'merriweather'|'lora' (serif) | 'inter'|'nunito'|'poppins'|'roboto' (sans)
         suggestion_length: 'short', // 'short' (2-3 sentences) or 'long' (4-6 sentences)
         stream_suggestions: false,  // Stream generation per card (Ollama & OpenAI-compatible only)
+        prompt_for_user_suggestions: true, // Ask for optional guidance before generating suggestions
         include_scenario: true,     // Include character scenario in context
         include_description: true,  // Include character description in context
         include_worldinfo: false,   // Include World Info lorebook in context
+        include_persona: false,     // Include {{persona}} (user persona description) in context
+        include_authors_note: false, // Include {{authorsNote}} in context
         custom_styles: [],
+        style_visibility: {},       // Map of style id -> false when hidden from the main toolbar
+        show_director_btn: true,    // Show the Director button on the main toolbar
+        show_surprise_btn: true,    // Show the Surprise Me dropdown on the main toolbar
+        icon_only_dropdowns: false, // Hide text labels in Genre/Custom/Surprise dropdown menus, icons + tooltip only
         hide_animated_bar: false,
         surprise_depth_min: 2,      // minimum messages away (used for random range or fixed min)
         surprise_depth_max: 6,      // maximum messages away (used for random range or fixed max)
@@ -144,6 +151,7 @@
     let isGenerating = false;
     let promptCache = {};
     let currentCategory = 'context';
+    let currentUserSuggestions = '';
     let directorMode = 'single_scene'; // 'single_scene' or 'story_beats'
 
     // Suggestion cache
@@ -234,6 +242,11 @@
         return buttons;
     }
 
+    /** Whether a style's button/entry should appear in the main toolbar (buttons, genre dropdown, custom dropdown, mobile select). */
+    function isStyleVisible(id) {
+        return settings.style_visibility?.[id] !== false;
+    }
+
     function getVisibleCategories() {
         const all = getAllCategories();
         const visible = {};
@@ -244,6 +257,39 @@
         }
 
         return visible;
+    }
+
+    // ============================================================
+    // MACRO HELPERS ({{persona}} / {{authorsNote}})
+    // ============================================================
+
+    /** Resolve the {{persona}} macro to the active user persona's description text. */
+    function getUserPersona() {
+        const ctx = SillyTavern.getContext();
+        try {
+            let expanded = '';
+            if (typeof ctx.substituteParams === 'function') {
+                expanded = ctx.substituteParams('{{persona}}');
+            } else if (typeof window.substituteParams === 'function') {
+                expanded = window.substituteParams('{{persona}}');
+            }
+            if (expanded && expanded !== '{{persona}}') return expanded;
+        } catch (_) { /* fall through to manual lookups */ }
+        try {
+            const pu = window.power_user;
+            if (pu) {
+                if (typeof pu.persona_description === 'string' && pu.persona_description) return pu.persona_description;
+                if (pu.personas && pu.persona && pu.personas[pu.persona]?.description) return pu.personas[pu.persona].description;
+                if (typeof pu.persona === 'string' && pu.persona.length > 30 && !pu.persona.endsWith('.json')) return pu.persona;
+            }
+        } catch (_) { /* no persona available */ }
+        return ctx.persona || ctx.userPersona || ctx.user_persona || '';
+    }
+
+    /** Resolve the {{authorsNote}} macro to the current chat's Author's Note text. */
+    function getAuthorsNote() {
+        const ctx = SillyTavern.getContext();
+        return ctx.chatMetadata?.note_prompt || ctx.authorsNote || ctx.authors_note || '';
     }
 
     // ============================================================
@@ -437,10 +483,10 @@ GUIDELINES:
             cleaned = cleaned.replace(/<[^>]*>/g, '');
             const txt = document.createElement('textarea');
             txt.innerHTML = cleaned;
-            return txt.value.substring(0, 10000);
+            return txt.value;
         };
 
-        const depth = Math.max(2, Math.min(10, settings.context_depth || 4));
+        const depth = Math.max(1, Math.min(500, settings.context_depth || 4));
         const recentMessages = chat.slice(-depth);
 
         const history = recentMessages.map(msg =>
@@ -451,6 +497,11 @@ GUIDELINES:
         let scenario = '';
         let description = '';
         let worldInfo = '';
+        let persona = '';
+        let authorsNote = '';
+
+        try { persona = getUserPersona() || ''; } catch (err) { warn('Failed to extract persona:', err); }
+        try { authorsNote = getAuthorsNote() || ''; } catch (err) { warn('Failed to extract Author\'s Note:', err); }
 
         if (stContext.characterId !== undefined && stContext.characters && stContext.characters[stContext.characterId]) {
             const char = stContext.characters[stContext.characterId];
@@ -502,7 +553,7 @@ GUIDELINES:
             // Method 4: chatMetadata.worldInfo
             if (entries.length === 0 && stContext.chatMetadata?.worldInfo) processEntries(stContext.chatMetadata.worldInfo);
 
-            if (entries.length > 0) worldInfo = entries.slice(0, 10).join('\n\n');
+            if (entries.length > 0) worldInfo = entries.join('\n\n');
         } catch (err) {
             warn('Failed to extract World Info:', err);
         }
@@ -513,6 +564,8 @@ GUIDELINES:
             scenario,
             description,
             worldInfo,
+            persona,
+            authorsNote,
             messageCount: recentMessages.length,
             chatId: stContext.chatId || Date.now()
         };
@@ -523,7 +576,7 @@ GUIDELINES:
     // GENERATION LOGIC (Pattern from EchoChamber)
     // ============================================================
 
-    async function generateSuggestions(category, forceRefresh = false, customDirections = null, mode = 'single_scene', outputContainer = null) {
+    async function generateSuggestions(category, forceRefresh = false, customDirections = null, mode = 'single_scene', outputContainer = null, userSuggestions = '') {
         log('Generating suggestions for:', category);
         const stContext = SillyTavern.getContext();
         const context = stContext;
@@ -546,7 +599,7 @@ GUIDELINES:
                 cachedChatId = storyContext.chatId;
             }
 
-            if (!forceRefresh && cachedSuggestions[category]) {
+            if (!forceRefresh && !userSuggestions && cachedSuggestions[category]) {
                 displaySuggestions(cachedSuggestions[category], category, outputContainer);
                 return;
             }
@@ -572,20 +625,31 @@ GUIDELINES:
             categoryPrompt = categoryPrompt
                 .replace(/{{char}}/g, charName)
                 .replace(/{{user}}/g, userName)
-                .replace(/{{model}}/g, charName); // some prompts use model as char alias
+                .replace(/{{model}}/g, charName) // some prompts use model as char alias
+                .replace(/{{persona}}/g, storyContext.persona || '')
+                .replace(/{{authorsNote}}/g, storyContext.authorsNote || '');
 
             let contextBlock = '';
 
             if (storyContext.characterInfo) contextBlock += `${storyContext.characterInfo}\n\n`;
             if (settings.include_scenario && storyContext.scenario) contextBlock += `Scenario: ${storyContext.scenario}\n\n`;
             if (settings.include_description && storyContext.description) {
-                contextBlock += `Character Description: ${storyContext.description.substring(0, 10000)}\n\n`;
+                contextBlock += `Character Description: ${storyContext.description}\n\n`;
             }
             if (settings.include_worldinfo && storyContext.worldInfo) {
-                contextBlock += `World Lore:\n${storyContext.worldInfo.substring(0, 10000)}\n\n`;
+                contextBlock += `World Lore:\n${storyContext.worldInfo}\n\n`;
             }
-            contextBlock += `Recent conversation:\n${storyContext.history}`;
+            if (settings.include_persona && storyContext.persona) {
+                contextBlock += `${userName}'s Persona: ${storyContext.persona}\n\n`;
+            }
+            if (settings.include_authors_note && storyContext.authorsNote) {
+                contextBlock += `Author's Note: ${storyContext.authorsNote}\n\n`;
+            }
+            contextBlock += `[RECENT CONVERSATION HISTORY]:\n${storyContext.history}`;
 
+            const userSuggestionsBlock = userSuggestions.trim()
+                ? `\n\n[USER SUGGESTIONS]\nTake the following suggestion written by the human user into account when creating your suggestions:\n${userSuggestions.trim()}\n\n`
+                : '\n';
             let userPrompt = '';
             let calculatedMaxTokens = 0;
 
@@ -607,7 +671,7 @@ GUIDELINES:
                 if (mode === 'story_beats') {
                     // Story Beats: 1 input = 1 suggestion (Classic behavior)
                     const dirList = customDirections.map((d, i) => `${i + 1}. ${d}`).join('\n');
-                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate exactly ${customDirections.length} suggestions, one for each of the following directions.\n\nUSER DIRECTIONS:\n${dirList}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- PREVENT BLEED: Each suggestion must be strictly isolated to its corresponding input beat. Do NOT combine events from different beats unless explicitly requested.\n- Follow the specific direction for each suggestion EXACTLY.\n- Keep titles punchy and plain text (no asterisks).\n- ${settings.suggestion_length === 'long' ? 'Write 4-6 sentences per suggestion.' : 'Write 2-3 sentences per suggestion.'}\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${customDirections.length} suggestions, one for each of the following directions.${userSuggestionsBlock}USER DIRECTIONS:\n${dirList}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- PREVENT BLEED: Each suggestion must be strictly isolated to its corresponding input beat. Do NOT combine events from different beats unless explicitly requested.\n- Follow the specific direction for each suggestion EXACTLY.\n- Keep titles punchy and plain text (no asterisks).\n- ${settings.suggestion_length === 'long' ? 'Write 4-6 sentences per suggestion.' : 'Write 2-3 sentences per suggestion.'}\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                     // Recalculate for director mode with custom directions
                     const dirTokensNeeded = customDirections.length * tokensPerSuggestion + 800;
                     if (settings.reasoning_mode) {
@@ -622,7 +686,7 @@ GUIDELINES:
                         ? 'Each description should be 4-6 sentences, providing rich detail and context.'
                         : 'Each description should be 2-3 sentences, concise but evocative.';
 
-                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nThe user has provided the following direction/scenario for the next scene:\n"${combinedDirections}"\n\nBased on this direction, generate exactly ${settings.suggestions_count} DISTINCT options or variations for how this scene could play out.\n${lengthInstruction}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- All suggestions must follow the user's direction but offer different execution/flavor.\n- Keep titles punchy and plain text.\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]${userSuggestionsBlock}The user has provided the following direction/scenario for the next scene:\n"${combinedDirections}"\n\nBased on this direction, generate exactly ${settings.suggestions_count} DISTINCT options or variations for how this scene could play out.\n${lengthInstruction}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- All suggestions must follow the user's direction but offer different execution/flavor.\n- Keep titles punchy and plain text.\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                     // Recalculate for director single scene mode
                     if (settings.reasoning_mode) {
                         calculatedMaxTokens = Math.max(settings.max_output_tokens || 8192, baseTokensNeeded);
@@ -635,7 +699,7 @@ GUIDELINES:
                     ? 'Each description should be 4-6 sentences, providing rich detail and context.'
                     : 'Each description should be 2-3 sentences, concise but evocative.';
 
-                userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate exactly ${settings.suggestions_count} distinct suggestions.\n${lengthInstruction}\nFollow the format specified in the system instructions exactly.\nIMPORTANT: Use PLAIN TEXT for titles - do NOT wrap titles in **asterisks**.\nDo NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${settings.suggestions_count} distinct suggestions.${userSuggestionsBlock}${lengthInstruction}\nAlways follow the format specified in the system instructions exactly.\nIMPORTANT: Use PLAIN TEXT for titles - do NOT wrap titles in **asterisks**.\nDo NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                 // Use the pre-calculated baseTokensNeeded (already calculated above)
                 if (settings.reasoning_mode) {
                     calculatedMaxTokens = Math.max(settings.max_output_tokens || 8192, baseTokensNeeded);
@@ -1486,7 +1550,7 @@ GUIDELINES:
             if (cat.nsfw && !settings.show_explicit) continue;
             const sIcon = allCategories[key]?.icon || cat.icon;
             surpriseItems += `
-                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}">
+                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}" title="${cat.name}">
                     <i class="fa-solid ${sIcon}"></i>
                     <span>${cat.name}</span>
                 </button>`;
@@ -1497,7 +1561,7 @@ GUIDELINES:
             if (cat.nsfw && !settings.show_explicit) continue;
             const sIcon = allCategories[key]?.icon || cat.icon;
             surpriseItems += `
-                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}">
+                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}" title="${cat.name}">
                     <i class="fa-solid ${sIcon}"></i>
                     <span>${cat.name}</span>
                 </button>`;
@@ -1506,7 +1570,7 @@ GUIDELINES:
         if (settings.custom_styles?.length) {
             for (const style of settings.custom_styles) {
                 surpriseItems += `
-                    <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${style.id}">
+                    <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${style.id}" title="${style.name}">
                         <i class="fa-solid ${style.icon}"></i>
                         <span>${style.name}</span>
                     </button>`;
@@ -1524,7 +1588,7 @@ GUIDELINES:
                     <i class="fa-solid fa-wand-sparkles"></i>
                     ${surpriseIndicatorHtml}
                 </button>
-                <div class="pw_dropdown_menu pw_surprise_menu">
+                <div class="pw_dropdown_menu pw_surprise_menu${settings.icon_only_dropdowns ? ' pw_icon_only' : ''}">
                     <div class="pw_surprise_menu_header">
                         <i class="fa-solid fa-wand-sparkles"></i> Surprise Me
                         <span class="pw_setting_tooltip_icon" title="Surprise Me secretly injects an AI-generated suggestion into the chat context a set number of messages before it fires. Pick a style, and Pathweaver will quietly arm a hidden prompt. When the countdown hits, the suggestion appears naturally — like the story took an unexpected turn on its own.">?</span>
@@ -1547,22 +1611,27 @@ GUIDELINES:
         let builtinButtonsHtml = '';
 
         // Director Button (Special)
-        builtinButtonsHtml += `
-            <button class="pw_cat_btn pw_director_btn"
-                    data-category="director"
-                    data-name="Director"
-                    title="Director: Take control of the story">
-                <i class="fa-solid fa-clapperboard"></i>
-            </button>`;
+        if (settings.show_director_btn) {
+            builtinButtonsHtml += `
+                <button class="pw_cat_btn pw_director_btn"
+                        data-category="director"
+                        data-name="Director"
+                        title="Director: Take control of the story">
+                    <i class="fa-solid fa-clapperboard"></i>
+                </button>`;
+        }
 
         // Surprise Me dropdown — immediately after Director
-        builtinButtonsHtml += surpriseDropdownHtml;
+        if (settings.show_surprise_btn) {
+            builtinButtonsHtml += surpriseDropdownHtml;
+        }
 
         // Main Categories (Context, Twist, Character, Explicit)
         let categoryOptionsHtml = '<option value="director">Director Mode</option>';
 
         for (const [key, cat] of Object.entries(MAIN_CATEGORIES)) {
             if (cat.nsfw && !settings.show_explicit) continue;
+            if (!isStyleVisible(key)) continue;
             const bIcon = allCategories[key]?.icon || cat.icon;
 
             const btnHtml = `
@@ -1582,8 +1651,9 @@ GUIDELINES:
         if (settings.custom_styles?.length) {
             let customItems = '';
             for (const style of settings.custom_styles) {
+                if (!isStyleVisible(style.id)) continue;
                 customItems += `
-                    <button class="pw_dropdown_item" data-category="${style.id}">
+                    <button class="pw_dropdown_item" data-category="${style.id}" title="${style.name}">
                         <i class="fa-solid ${style.icon}"></i>
                         <span>${style.name}</span>
                     </button>`;
@@ -1591,15 +1661,15 @@ GUIDELINES:
                 categoryOptionsHtml += `<option value="${style.id}">${style.name}</option>`;
             }
 
-            customDropdownHtml = `
+            customDropdownHtml = customItems ? `
             <div class="pw_dropdown_container">
                 <button class="pw_dropdown_btn" data-name="Custom Styles" title="Custom Styles">
                     <i class="fa-solid fa-layer-group"></i>
                 </button>
-                <div class="pw_dropdown_menu">
+                <div class="pw_dropdown_menu${settings.icon_only_dropdowns ? ' pw_icon_only' : ''}">
                     ${customItems}
                 </div>
-            </div>`;
+            </div>` : '';
         }
 
         // 3. Genre Dropdown (Visual)
@@ -1610,9 +1680,10 @@ GUIDELINES:
 
         for (const [key, cat] of sortedGenres) {
             if (cat.nsfw && !settings.show_explicit) continue;
+            if (!isStyleVisible(key)) continue;
             const gIcon = allCategories[key]?.icon || cat.icon;
             genreItems += `
-                <button class="pw_dropdown_item" data-category="${key}">
+                <button class="pw_dropdown_item" data-category="${key}" title="${cat.name}">
                     <i class="fa-solid ${gIcon}"></i>
                     <span>${cat.name}</span>
                 </button>`;
@@ -1626,7 +1697,7 @@ GUIDELINES:
                  <button class="pw_dropdown_btn" data-name="Genres" title="Genres">
                     <i class="fa-solid fa-masks-theater"></i>
                 </button>
-                <div class="pw_dropdown_menu">
+                <div class="pw_dropdown_menu${settings.icon_only_dropdowns ? ' pw_icon_only' : ''}">
                     ${genreItems}
                 </div>
             </div>
@@ -1703,12 +1774,11 @@ GUIDELINES:
         // 1. Regular Buttons
         jQuery(document).on(`click${eventNs}`, '.pw_cat_btn', function (e) {
             const category = jQuery(this).data('category');
-            if (category === 'director') {
-                e.stopPropagation();
-                showDirectorModal();
-                return;
-            }
-            openSuggestionsModal(category);
+            e.stopPropagation();
+            requestUserSuggestions(category, (userSuggestions) => {
+                if (category === 'director') showDirectorModal(userSuggestions);
+                else openSuggestionsModal(category, userSuggestions);
+            });
         });
 
         // 2. Dropdown Toggles
@@ -1742,7 +1812,7 @@ GUIDELINES:
             jQuery('.pw_dropdown_btn').removeClass('active');
 
             if (category) {
-                openSuggestionsModal(category);
+                requestUserSuggestions(category, (userSuggestions) => openSuggestionsModal(category, userSuggestions));
             }
         });
 
@@ -1760,9 +1830,9 @@ GUIDELINES:
             const category = this.value;
             if (category) {
                 if (category === 'director') {
-                    showDirectorModal();
+                    requestUserSuggestions(category, (userSuggestions) => showDirectorModal(userSuggestions));
                 } else {
-                    openSuggestionsModal(category);
+                    requestUserSuggestions(category, (userSuggestions) => openSuggestionsModal(category, userSuggestions));
                 }
                 this.selectedIndex = 0; // Reset
             }
@@ -1869,7 +1939,7 @@ GUIDELINES:
     // UI - SUGGESTIONS MODAL
     // ============================================================
 
-    function showDirectorModal() {
+    function showDirectorModal(userSuggestions = '') {
         // Remove existing modal to ensure fresh state and logic
         if (jQuery('#pw_director_modal').length) {
             jQuery('#pw_director_modal').remove();
@@ -2102,7 +2172,7 @@ GUIDELINES:
             suggestionsGenerated = true;
 
             // Trigger generation rendered into the results content container
-            generateSuggestions('director', true, directions, directorMode, jQuery('#pw_director_results_content'));
+            generateSuggestions('director', true, directions, directorMode, jQuery('#pw_director_results_content'), userSuggestions);
         });
 
         // Show
@@ -2135,7 +2205,7 @@ GUIDELINES:
         suggestionsModal = jQuery('#pw_suggestions_modal');
 
         jQuery('#pw_close_suggestions').on('click', closeSuggestionsModal);
-        jQuery('#pw_refresh_btn').on('click', () => generateSuggestions(currentCategory, true));
+        jQuery('#pw_refresh_btn').on('click', () => generateSuggestions(currentCategory, true, null, 'single_scene', null, currentUserSuggestions));
 
         suggestionsModal.on('click', (e) => {
             if (e.target === suggestionsModal[0]) closeSuggestionsModal();
@@ -2146,9 +2216,55 @@ GUIDELINES:
         });
     }
 
-    function openSuggestionsModal(category) {
+    function requestUserSuggestions(category, onSubmit) {
+        if (!settings.prompt_for_user_suggestions) {
+            onSubmit('');
+            return;
+        }
+
+        jQuery('#pw_user_suggestions_modal').remove();
+        const categoryName = getAllCategories()[category]?.name || 'Story Directions';
+        jQuery('body').append(`
+        <div class="pw_modal_overlay" id="pw_user_suggestions_modal">
+            <div class="pw_modal pw_user_suggestions_modal">
+                <div class="pw_modal_header">
+                    <h3 class="pw_modal_title"><i class="fa-solid fa-lightbulb"></i> Guide ${categoryName}</h3>
+                    <button class="pw_modal_close" id="pw_close_user_suggestions">&times;</button>
+                </div>
+                <div class="pw_modal_body">
+                    <p class="pw_user_suggestions_hint">Add an optional idea for the next scene. Pathweaver will use it as creative guidance while still generating varied suggestions.</p>
+                    <textarea id="pw_user_suggestions_input" class="text_pole" rows="5" placeholder="e.g. I want the next scene to reveal a dangerous secret, but keep the mood playful."></textarea>
+                    <div class="pw_user_suggestions_actions">
+                        <button class="pw_header_btn" id="pw_skip_user_suggestions">Continue without guidance</button>
+                        <button class="pw_header_btn primary" id="pw_submit_user_suggestions"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate</button>
+                    </div>
+                </div>
+            </div>
+        </div>`);
+
+        const modal = jQuery('#pw_user_suggestions_modal');
+        const close = () => modal.remove();
+        const submit = () => {
+            const userSuggestions = jQuery('#pw_user_suggestions_input').val().trim();
+            close();
+            onSubmit(userSuggestions);
+        };
+        jQuery('#pw_close_user_suggestions, #pw_skip_user_suggestions').on('click', () => {
+            close();
+            onSubmit('');
+        });
+        jQuery('#pw_submit_user_suggestions').on('click', submit);
+        modal.on('click', (e) => { if (e.target === modal[0]) close(); });
+        setTimeout(() => {
+            modal.addClass('active');
+            jQuery('#pw_user_suggestions_input').trigger('focus');
+        }, 10);
+    }
+
+    function openSuggestionsModal(category, userSuggestions = '') {
         createSuggestionsModal();
         currentCategory = category;
+        currentUserSuggestions = userSuggestions;
 
         const allCategories = getAllCategories();
         let catInfo = allCategories[category];
@@ -2163,7 +2279,7 @@ GUIDELINES:
             .addClass(`fa-solid ${catInfo?.icon || 'fa-compass'}`);
 
         suggestionsModal.addClass('active');
-        generateSuggestions(category);
+        generateSuggestions(category, false, null, 'single_scene', null, userSuggestions);
     }
 
     function closeSuggestionsModal() {
@@ -2293,9 +2409,31 @@ GUIDELINES:
         return text;
     }
 
-    function copyToClipboard(text) {
+    async function copyToClipboard(text) {
         const formatted = getFormattedSuggestion(text);
-        navigator.clipboard.writeText(formatted).then(() => showToast('Copied to clipboard!'));
+
+        try {
+            if (navigator.clipboard?.writeText && window.isSecureContext) {
+                await navigator.clipboard.writeText(formatted);
+                showToast('Copied to clipboard!');
+                return;
+            }
+        } catch (err) {
+            log('Clipboard API copy failed; using fallback:', err);
+        }
+
+        const textarea = document.createElement('textarea');
+        textarea.value = formatted;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        const copied = document.execCommand('copy');
+        textarea.remove();
+        showToast(copied ? 'Copied to clipboard!' : 'Could not copy to clipboard');
     }
 
     function insertSuggestion(suggestion) {
@@ -2441,13 +2579,9 @@ GUIDELINES:
                             <div class="pw_setting_row">
                                 <span class="pw_setting_label"><i class="fa-solid fa-layer-group"></i> Context depth</span>
                                 <div class="pw_setting_control">
-                                    <select id="pw_sm_context" class="pw_select text_pole">
-                                        <option value="2" ${settings.context_depth == 2 ? 'selected' : ''}>2 messages</option>
-                                        <option value="4" ${settings.context_depth == 4 ? 'selected' : ''}>4 messages</option>
-                                        <option value="6" ${settings.context_depth == 6 ? 'selected' : ''}>6 messages</option>
-                                        <option value="8" ${settings.context_depth == 8 ? 'selected' : ''}>8 messages</option>
-                                        <option value="10" ${settings.context_depth == 10 ? 'selected' : ''}>10 messages</option>
-                                    </select>
+                                    <input id="pw_sm_context" type="number" class="text_pole" min="1" max="500" step="1"
+                                        value="${settings.context_depth || 4}" style="width: 90px;"
+                                        title="Number of recent chat messages to include as context">
                                 </div>
                             </div>
                             <div class="pw_setting_row">
@@ -2465,6 +2599,13 @@ GUIDELINES:
                             </div>
                             <p class="pw_setting_hint pw_setting_stream_hint">
                                 Cards appear as each suggestion is generated. Works with Ollama and OpenAI-compatible APIs; Connection Profile may also support streaming.
+                            </p>
+                            <div class="pw_setting_row" style="margin-top: 12px;">
+                                <span class="pw_setting_label"><i class="fa-solid fa-lightbulb"></i> Ask for guidance before generating</span>
+                                <div class="pw_toggle ${settings.prompt_for_user_suggestions ? 'active' : ''}" data-setting="prompt_for_user_suggestions"></div>
+                            </div>
+                            <p class="pw_setting_hint">
+                                Opens an optional note field before every suggestion style. Leave it blank to generate normally.
                             </p>
                             
                             <!-- Reasoning Mode Settings -->
@@ -2502,6 +2643,14 @@ GUIDELINES:
                             <div class="pw_setting_row">
                                 <span class="pw_setting_label"><i class="fa-solid fa-user"></i> Include Character Description</span>
                                 <div class="pw_toggle ${settings.include_description ? 'active' : ''}" data-setting="include_description"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-id-card"></i> Include Your Persona</span>
+                                <div class="pw_toggle ${settings.include_persona ? 'active' : ''}" data-setting="include_persona"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-note-sticky"></i> Include Author's Note</span>
+                                <div class="pw_toggle ${settings.include_authors_note ? 'active' : ''}" data-setting="include_authors_note"></div>
                             </div>
                             <div class="pw_setting_row" style="flex-wrap: wrap;">
                                 <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
@@ -2608,6 +2757,20 @@ GUIDELINES:
                                     </select>
                                 </div>
                             </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-clapperboard"></i> Show Director button</span>
+                                <div class="pw_toggle ${settings.show_director_btn ? 'active' : ''}" data-setting="show_director_btn"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-wand-sparkles"></i> Show Surprise Me button</span>
+                                <div class="pw_toggle ${settings.show_surprise_btn ? 'active' : ''}" data-setting="show_surprise_btn"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-icons"></i> Icon-only dropdown menus
+                                    <span class="pw_setting_tooltip_icon" title="Hides the text labels inside the Genre, Custom Styles, and Surprise Me dropdown menus, showing just the icons in a compact grid. Hover an icon to see its name.">?</span>
+                                </span>
+                                <div class="pw_toggle ${settings.icon_only_dropdowns ? 'active' : ''}" data-setting="icon_only_dropdowns"></div>
+                            </div>
                         </div>
 
                         <div class="pw_settings_section">
@@ -2707,6 +2870,9 @@ GUIDELINES:
                 createActionBar();
             }
             if (setting === 'show_explicit') createActionBar();
+            if (setting === 'show_director_btn' || setting === 'show_surprise_btn' || setting === 'icon_only_dropdowns') {
+                createActionBar();
+            }
             if (setting === 'hide_animated_bar') {
                 jQuery('.pw_action_bar').toggleClass('pw_hide_animated_bar', settings.hide_animated_bar);
             }
@@ -2790,7 +2956,7 @@ GUIDELINES:
             syncSettingsToPanel();
         });
 
-        jQuery('#pw_sm_context').on('change', function () { settings.context_depth = parseInt(this.value) || 4; saveSettings(); syncSettingsToPanel(); });
+        jQuery('#pw_sm_context').on('change', function () { settings.context_depth = Math.max(1, Math.min(500, parseInt(this.value) || 4)); this.value = settings.context_depth; saveSettings(); syncSettingsToPanel(); });
 
         // Suggestion length
         jQuery('#pw_sm_suggestion_length').on('change', function () { settings.suggestion_length = this.value; saveSettings(); syncSettingsToPanel(); });
@@ -3079,21 +3245,32 @@ GUIDELINES:
         // getAllCategories() already merges builtin_icon_customizations so icons reflect saved overrides
         const allCats = getAllCategories();
 
+        const visibilityBtnHtml = (id) => {
+            const visible = isStyleVisible(id);
+            return `
+                <button class="pw_style_action_btn pw_toggle_visibility_btn${visible ? '' : ' pw_style_hidden_toggle'}"
+                        title="${visible ? 'Hide from toolbar' : 'Show in toolbar'}">
+                    <i class="fa-solid ${visible ? 'fa-eye' : 'fa-eye-slash'}"></i>
+                </button>`;
+        };
+
         // Built-in styles first
         for (const [key, cat] of Object.entries(MAIN_CATEGORIES)) {
             if (cat.nsfw && !settings.show_explicit) continue;
             const displayIcon = allCats[key]?.icon || cat.icon;
+            const hiddenClass = isStyleVisible(key) ? '' : ' pw_style_hidden';
 
             listContainer.append(`
-                <div class="pw_style_item builtin" data-style-id="${key}" data-builtin="true">
+                <div class="pw_style_item builtin${hiddenClass}" data-style-id="${key}" data-builtin="true">
                     <div class="pw_style_icon">
                         <i class="fa-solid ${displayIcon}"></i>
                     </div>
                     <div class="pw_style_info">
                         <div class="pw_style_name">${cat.name}</div>
-                        <div class="pw_style_type">Main Style</div>
+                        <div class="pw_style_type">Main Style${isStyleVisible(key) ? '' : ' &middot; Hidden from toolbar'}</div>
                     </div>
                     <div class="pw_style_actions">
+                        ${visibilityBtnHtml(key)}
                         <button class="pw_style_action_btn pw_edit_style_btn" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </button>
@@ -3106,17 +3283,19 @@ GUIDELINES:
         for (const [key, cat] of Object.entries(GENRE_CATEGORIES)) {
             if (cat.nsfw && !settings.show_explicit) continue;
             const displayIcon = allCats[key]?.icon || cat.icon;
+            const hiddenClass = isStyleVisible(key) ? '' : ' pw_style_hidden';
 
             listContainer.append(`
-                <div class="pw_style_item builtin" data-style-id="${key}" data-builtin="true">
+                <div class="pw_style_item builtin${hiddenClass}" data-style-id="${key}" data-builtin="true">
                     <div class="pw_style_icon">
                         <i class="fa-solid ${displayIcon}"></i>
                     </div>
                     <div class="pw_style_info">
                         <div class="pw_style_name">${cat.name}</div>
-                        <div class="pw_style_type">Genre Style</div>
+                        <div class="pw_style_type">Genre Style${isStyleVisible(key) ? '' : ' &middot; Hidden from toolbar'}</div>
                     </div>
                     <div class="pw_style_actions">
+                        ${visibilityBtnHtml(key)}
                         <button class="pw_style_action_btn pw_edit_style_btn" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </button>
@@ -3128,16 +3307,18 @@ GUIDELINES:
         // Custom styles
         if (settings.custom_styles?.length) {
             settings.custom_styles.forEach(style => {
+                const hiddenClass = isStyleVisible(style.id) ? '' : ' pw_style_hidden';
                 listContainer.append(`
-                    <div class="pw_style_item custom" data-style-id="${style.id}" data-builtin="false">
+                    <div class="pw_style_item custom${hiddenClass}" data-style-id="${style.id}" data-builtin="false">
                         <div class="pw_style_icon">
                             <i class="fa-solid ${style.icon}"></i>
                         </div>
                         <div class="pw_style_info">
                             <div class="pw_style_name">${style.name}</div>
-                            <div class="pw_style_type">Custom Style</div>
+                            <div class="pw_style_type">Custom Style${isStyleVisible(style.id) ? '' : ' &middot; Hidden from toolbar'}</div>
                         </div>
                         <div class="pw_style_actions">
+                            ${visibilityBtnHtml(style.id)}
                             <button class="pw_style_action_btn pw_edit_style_btn" title="Edit">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
@@ -3170,6 +3351,23 @@ GUIDELINES:
             const styleId = item.data('style-id');
             const isBuiltin = String(item.data('builtin')) === 'true';
             openEditorView(styleId, false, isBuiltin);
+        });
+
+        // Toggle toolbar visibility from list
+        jQuery('#pw_style_list').on('click', '.pw_toggle_visibility_btn', function (e) {
+            e.stopPropagation();
+            const item = jQuery(this).closest('.pw_style_item');
+            const styleId = item.data('style-id');
+            if (!settings.style_visibility) settings.style_visibility = {};
+            const nowVisible = !isStyleVisible(styleId);
+            if (nowVisible) {
+                delete settings.style_visibility[styleId];
+            } else {
+                settings.style_visibility[styleId] = false;
+            }
+            saveSettings();
+            renderStylesList();
+            createActionBar();
         });
 
         // Delete style from list
@@ -3452,6 +3650,7 @@ GUIDELINES:
         settings.custom_styles = settings.custom_styles.filter(s => s.id !== styleId);
         delete promptCache[styleId];
         delete cachedSuggestions[styleId];
+        if (settings.style_visibility) delete settings.style_visibility[styleId];
         saveSettings();
         createActionBar();
         renderStylesList();
@@ -3654,15 +3853,23 @@ GUIDELINES:
         categoryPrompt = categoryPrompt
             .replace(/{{char}}/g, charName)
             .replace(/{{user}}/g, userName)
-            .replace(/{{model}}/g, charName);
+            .replace(/{{model}}/g, charName)
+            .replace(/{{persona}}/g, storyContext.persona || '')
+            .replace(/{{authorsNote}}/g, storyContext.authorsNote || '');
 
         let contextBlock = '';
         if (storyContext.characterInfo) contextBlock += `${storyContext.characterInfo}\n\n`;
         if (settings.include_scenario && storyContext.scenario) contextBlock += `Scenario: ${storyContext.scenario}\n\n`;
         if (settings.include_description && storyContext.description) {
-            contextBlock += `Character Description: ${storyContext.description.substring(0, 5000)}\n\n`;
+            contextBlock += `Character Description: ${storyContext.description}\n\n`;
         }
-        contextBlock += `Recent conversation:\n${storyContext.history}`;
+        if (settings.include_persona && storyContext.persona) {
+            contextBlock += `${userName}'s Persona: ${storyContext.persona}\n\n`;
+        }
+        if (settings.include_authors_note && storyContext.authorsNote) {
+            contextBlock += `Author's Note: ${storyContext.authorsNote}\n\n`;
+        }
+        contextBlock += `[RECENT CONVERSATION HISTORY]:\n${storyContext.history}`;
 
         const userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate exactly ONE single, self-contained narrative event or development that could be secretly injected into this story. This will be used as a hidden system note that the AI will act upon at the right moment.\n\nWrite it as a concise system instruction (1-3 sentences) in the format:\n[System Note: <the secret event/development>]\n\nMake it specific, surprising, and narratively interesting. Do NOT include any preamble, explanation, or multiple options — just the single system note.`;
 
@@ -4027,11 +4234,17 @@ GUIDELINES:
         jQuery('#pw_bar_height').val(settings.bar_height);
         jQuery('#pw_bar_title_font').val(settings.bar_title_font || 'default');
         applyTitleFontSelectDisplay(document.getElementById('pw_bar_title_font'));
+        jQuery('#pw_show_director_btn').prop('checked', settings.show_director_btn);
+        jQuery('#pw_show_surprise_btn').prop('checked', settings.show_surprise_btn);
+        jQuery('#pw_icon_only_dropdowns').prop('checked', settings.icon_only_dropdowns);
         // Context sources
         jQuery('#pw_include_scenario').prop('checked', settings.include_scenario);
         jQuery('#pw_include_description').prop('checked', settings.include_description);
         jQuery('#pw_include_worldinfo').prop('checked', settings.include_worldinfo);
+        jQuery('#pw_include_persona').prop('checked', settings.include_persona);
+        jQuery('#pw_include_authors_note').prop('checked', settings.include_authors_note);
         jQuery('#pw_stream_suggestions').prop('checked', settings.stream_suggestions);
+        jQuery('#pw_prompt_for_user_suggestions').prop('checked', settings.prompt_for_user_suggestions);
         // Reasoning mode settings
         jQuery('#pw_reasoning_mode').prop('checked', settings.reasoning_mode);
         jQuery('#pw_max_output_tokens').val(settings.max_output_tokens || 16384);
@@ -4078,6 +4291,9 @@ GUIDELINES:
         jQuery('.pw_toggle[data-setting="show_explicit"]').toggleClass('active', settings.show_explicit);
         jQuery('.pw_toggle[data-setting="insert_mode"]').toggleClass('active', settings.insert_mode);
         jQuery('.pw_toggle[data-setting="hide_animated_bar"]').toggleClass('active', settings.hide_animated_bar);
+        jQuery('.pw_toggle[data-setting="show_director_btn"]').toggleClass('active', settings.show_director_btn);
+        jQuery('.pw_toggle[data-setting="show_surprise_btn"]').toggleClass('active', settings.show_surprise_btn);
+        jQuery('.pw_toggle[data-setting="icon_only_dropdowns"]').toggleClass('active', settings.icon_only_dropdowns);
 
         jQuery('.pw_toggle[data-setting="insert_type_enabled"]').toggleClass('active', settings.insert_type_enabled);
         if (settings.insert_type_enabled) jQuery('#pw_sm_insert_type_options').css('display', 'flex');
@@ -4104,6 +4320,8 @@ GUIDELINES:
         jQuery('.pw_toggle[data-setting="include_scenario"]').toggleClass('active', settings.include_scenario);
         jQuery('.pw_toggle[data-setting="include_description"]').toggleClass('active', settings.include_description);
         jQuery('.pw_toggle[data-setting="include_worldinfo"]').toggleClass('active', settings.include_worldinfo);
+        jQuery('.pw_toggle[data-setting="include_persona"]').toggleClass('active', settings.include_persona);
+        jQuery('.pw_toggle[data-setting="include_authors_note"]').toggleClass('active', settings.include_authors_note);
 
         // Reasoning mode settings
         jQuery('.pw_toggle[data-setting="reasoning_mode"]').toggleClass('active', settings.reasoning_mode);
@@ -4213,7 +4431,8 @@ GUIDELINES:
 
         // Context depth
         jQuery('#pw_context_depth').on('change', function () {
-            settings.context_depth = parseInt(this.value) || 4;
+            settings.context_depth = Math.max(1, Math.min(500, parseInt(this.value) || 4));
+            this.value = settings.context_depth;
             saveSettings();
             syncSettingsToModal();
         });
@@ -4241,6 +4460,36 @@ GUIDELINES:
             saveSettings();
             syncSettingsToModal();
             createActionBar();
+        });
+
+        // Show Director button
+        jQuery('#pw_show_director_btn').on('change', function () {
+            settings.show_director_btn = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+            createActionBar();
+        });
+
+        // Show Surprise Me button
+        jQuery('#pw_show_surprise_btn').on('change', function () {
+            settings.show_surprise_btn = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+            createActionBar();
+        });
+
+        // Icon-only dropdown menus
+        jQuery('#pw_icon_only_dropdowns').on('change', function () {
+            settings.icon_only_dropdowns = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+            createActionBar();
+        });
+
+        jQuery('#pw_prompt_for_user_suggestions').on('change', function () {
+            settings.prompt_for_user_suggestions = this.checked;
+            saveSettings();
+            syncSettingsToModal();
         });
 
         // Insert mode
@@ -4353,6 +4602,20 @@ GUIDELINES:
         // Include World Info
         jQuery('#pw_include_worldinfo').on('change', function () {
             settings.include_worldinfo = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+        });
+
+        // Include Persona
+        jQuery('#pw_include_persona').on('change', function () {
+            settings.include_persona = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+        });
+
+        // Include Author's Note
+        jQuery('#pw_include_authors_note').on('change', function () {
+            settings.include_authors_note = this.checked;
             saveSettings();
             syncSettingsToModal();
         });

@@ -437,6 +437,10 @@
     max-width: 600px;
 }
 
+.pw_modal.pw_user_suggestions_modal {
+    max-width: 620px;
+}
+
 /* Style editor modal - wider */
 .pw_modal.pw_editor_modal {
     max-width: 800px;
@@ -536,6 +540,29 @@
     overflow-y: auto;
     overflow-x: hidden;
     background: var(--SmartThemeBlurTintColor, rgba(25, 25, 35, 0.95));
+}
+
+.pw_user_suggestions_hint {
+    margin: 0 0 12px;
+    color: var(--pw-text-secondary);
+    line-height: 1.45;
+}
+
+#pw_user_suggestions_input {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+    box-sizing: border-box;
+    padding: 10px;
+    color: var(--pw-text-primary);
+}
+
+.pw_user_suggestions_actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
 }
 
 /* Status/Loading Area - NO refresh button inside */
@@ -2299,6 +2326,19 @@
     color: var(--pw-danger);
 }
 
+.pw_style_item.pw_style_hidden {
+    opacity: 0.55;
+}
+
+.pw_style_item.pw_style_hidden .pw_style_type {
+    color: var(--pw-danger, #f87171);
+}
+
+.pw_toggle_visibility_btn.pw_style_hidden_toggle {
+    color: var(--pw-danger, #f87171);
+    border-color: var(--pw-danger, #f87171);
+}
+
 /* Editor View (Back of Flip) */
 .pw_editor_back_header {
     display: flex;
@@ -3024,14 +3064,16 @@
     bottom: calc(100% + 8px);
     /* Open upwards */
     top: auto;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
+    transform: translateY(0);
     background: var(--SmartThemeBlurTintColor, rgba(30, 30, 40, 0.98));
     border: 1px solid var(--pw-glass-border);
     border-radius: var(--pw-radius-sm);
     box-shadow: var(--pw-shadow);
     z-index: 1000;
-    min-width: 180px;
+    width: max-content;
+    min-width: 0;
+    max-width: calc(100vw - 16px);
     padding: 6px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
@@ -3055,12 +3097,12 @@
 @keyframes pw_fade_in {
     from {
         opacity: 0;
-        transform: translateX(-50%) translateY(10px);
+        transform: translateY(10px);
     }
 
     to {
         opacity: 1;
-        transform: translateX(-50%) translateY(0);
+        transform: translateY(0);
 
     }
 }
@@ -3070,7 +3112,8 @@
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    width: 100%;
+    width: max-content;
+    max-width: 100%;
     border: none;
     background: transparent;
     color: var(--pw-text-primary);
@@ -3103,6 +3146,161 @@
 .pw_action_bar.pw_height_compact .pw_dropdown_btn {
     width: 30px;
     height: 30px;
+}
+
+/* Icon-only dropdown mode — grid of icon buttons, no text labels.
+   The item's `title` attribute still provides the name on hover. */
+.pw_dropdown_menu.pw_icon_only {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+    gap: 4px;
+    min-width: 160px;
+}
+
+.pw_dropdown_menu.pw_icon_only.show {
+    display: grid !important;
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item {
+    flex-direction: column;
+    justify-content: center;
+    width: auto;
+    gap: 0;
+    padding: 8px 4px;
+}
+
+/* Small + Compact is the dense toolbar preset. Keep these values after the
+   responsive rules so the mobile 32px touch-target defaults cannot override it. */
+.pw_action_bar.pw_font_small.pw_height_compact {
+    min-height: 32px;
+    height: 32px;
+    padding: 2px 4px;
+    gap: 2px;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn {
+    width: 27px;
+    height: 27px;
+    min-width: 27px;
+    min-height: 27px;
+    margin: 0 2px;
+    padding: 0;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn i,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn i,
+.pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn i {
+    font-size: 11px;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact #pw_bar_settings {
+    width: 25px;
+    height: 25px;
+    min-width: 25px;
+    min-height: 25px;
+}
+
+.pw_action_bar.pw_font_small.pw_height_compact .pw_category_buttons {
+    gap: 2px;
+}
+
+@media (max-width: 768px) {
+    /* Mobile dropdowns open toward the left from their trigger so the panel
+       stays on-screen when the toolbar is aligned to the right. */
+    .pw_dropdown_menu {
+        right: 0;
+        left: auto;
+        max-width: calc(100vw - 16px);
+        max-height: 220px;
+        padding: 3px;
+    }
+
+    .pw_dropdown_item {
+        gap: 6px;
+        padding: 5px 7px;
+        font-size: 0.75rem;
+    }
+
+    .pw_dropdown_item i {
+        width: 14px;
+        font-size: 0.8rem;
+    }
+
+    .pw_dropdown_menu.pw_icon_only {
+        min-width: 132px;
+        grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+        gap: 2px;
+    }
+
+    .pw_dropdown_menu.pw_icon_only .pw_dropdown_item {
+        padding: 5px 3px;
+    }
+
+    .pw_dropdown_menu.pw_icon_only .pw_dropdown_item i {
+        font-size: 0.8rem;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact {
+        min-height: 30px;
+        height: 30px;
+        flex-wrap: nowrap;
+        overflow: visible;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_category_buttons {
+        flex-wrap: nowrap !important;
+        padding: 0;
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn {
+        width: 26px !important;
+        height: 26px !important;
+        min-width: 26px;
+        min-height: 26px;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact #pw_bar_settings {
+        width: 24px !important;
+        height: 24px !important;
+        min-width: 24px;
+        min-height: 24px;
+    }
+
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn i,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn i,
+    .pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn i {
+        font-size: 12px;
+    }
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item span {
+    display: none;
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item i {
+    width: auto;
+    font-size: 1.05rem;
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item:hover {
+    padding-left: 4px;
+    /* Undo the text-mode hover shift since there's no label to make room for */
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Non-item chrome (headers, badges, "Clear all") in the Surprise menu should
+   keep spanning the full grid width instead of being squeezed into a cell. */
+.pw_dropdown_menu.pw_icon_only .pw_surprise_menu_header,
+.pw_dropdown_menu.pw_icon_only .pw_surprise_endless_badge,
+.pw_dropdown_menu.pw_icon_only .pw_surprise_active_info {
+    grid-column: 1 / -1;
 }
 
 /* ============================================================
