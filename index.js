@@ -120,6 +120,7 @@
         bar_title_font: 'default',  // 'none' (hidden) | 'default' | 'crimson'|'georgia'|'merriweather'|'lora' (serif) | 'inter'|'nunito'|'poppins'|'roboto' (sans)
         suggestion_length: 'short', // 'short' (2-3 sentences) or 'long' (4-6 sentences)
         stream_suggestions: false,  // Stream generation per card (Ollama & OpenAI-compatible only)
+        prompt_for_user_suggestions: true, // Ask for optional guidance before generating suggestions
         include_scenario: true,     // Include character scenario in context
         include_description: true,  // Include character description in context
         include_worldinfo: false,   // Include World Info lorebook in context
@@ -150,6 +151,7 @@
     let isGenerating = false;
     let promptCache = {};
     let currentCategory = 'context';
+    let currentUserSuggestions = '';
     let directorMode = 'single_scene'; // 'single_scene' or 'story_beats'
 
     // Suggestion cache
@@ -574,7 +576,7 @@ GUIDELINES:
     // GENERATION LOGIC (Pattern from EchoChamber)
     // ============================================================
 
-    async function generateSuggestions(category, forceRefresh = false, customDirections = null, mode = 'single_scene', outputContainer = null) {
+    async function generateSuggestions(category, forceRefresh = false, customDirections = null, mode = 'single_scene', outputContainer = null, userSuggestions = '') {
         log('Generating suggestions for:', category);
         const stContext = SillyTavern.getContext();
         const context = stContext;
@@ -597,7 +599,7 @@ GUIDELINES:
                 cachedChatId = storyContext.chatId;
             }
 
-            if (!forceRefresh && cachedSuggestions[category]) {
+            if (!forceRefresh && !userSuggestions && cachedSuggestions[category]) {
                 displaySuggestions(cachedSuggestions[category], category, outputContainer);
                 return;
             }
@@ -645,6 +647,9 @@ GUIDELINES:
             }
             contextBlock += `[RECENT CONVERSATION HISTORY]:\n${storyContext.history}`;
 
+            const userSuggestionsBlock = userSuggestions.trim()
+                ? `\n\n[USER SUGGESTIONS]\nTake the following suggestion written by the human user into account when creating your suggestions:\n${userSuggestions.trim()}\n\n`
+                : '\n';
             let userPrompt = '';
             let calculatedMaxTokens = 0;
 
@@ -666,7 +671,7 @@ GUIDELINES:
                 if (mode === 'story_beats') {
                     // Story Beats: 1 input = 1 suggestion (Classic behavior)
                     const dirList = customDirections.map((d, i) => `${i + 1}. ${d}`).join('\n');
-                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${customDirections.length} suggestions, one for each of the following directions.\n\nUSER DIRECTIONS:\n${dirList}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- PREVENT BLEED: Each suggestion must be strictly isolated to its corresponding input beat. Do NOT combine events from different beats unless explicitly requested.\n- Follow the specific direction for each suggestion EXACTLY.\n- Keep titles punchy and plain text (no asterisks).\n- ${settings.suggestion_length === 'long' ? 'Write 4-6 sentences per suggestion.' : 'Write 2-3 sentences per suggestion.'}\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${customDirections.length} suggestions, one for each of the following directions.${userSuggestionsBlock}USER DIRECTIONS:\n${dirList}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- PREVENT BLEED: Each suggestion must be strictly isolated to its corresponding input beat. Do NOT combine events from different beats unless explicitly requested.\n- Follow the specific direction for each suggestion EXACTLY.\n- Keep titles punchy and plain text (no asterisks).\n- ${settings.suggestion_length === 'long' ? 'Write 4-6 sentences per suggestion.' : 'Write 2-3 sentences per suggestion.'}\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                     // Recalculate for director mode with custom directions
                     const dirTokensNeeded = customDirections.length * tokensPerSuggestion + 800;
                     if (settings.reasoning_mode) {
@@ -681,7 +686,7 @@ GUIDELINES:
                         ? 'Each description should be 4-6 sentences, providing rich detail and context.'
                         : 'Each description should be 2-3 sentences, concise but evocative.';
 
-                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nThe user has provided the following direction/scenario for the next scene:\n"${combinedDirections}"\n\nBased on this direction, generate exactly ${settings.suggestions_count} DISTINCT options or variations for how this scene could play out.\n${lengthInstruction}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- All suggestions must follow the user's direction but offer different execution/flavor.\n- Keep titles punchy and plain text.\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]${userSuggestionsBlock}The user has provided the following direction/scenario for the next scene:\n"${combinedDirections}"\n\nBased on this direction, generate exactly ${settings.suggestions_count} DISTINCT options or variations for how this scene could play out.\n${lengthInstruction}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- All suggestions must follow the user's direction but offer different execution/flavor.\n- Keep titles punchy and plain text.\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                     // Recalculate for director single scene mode
                     if (settings.reasoning_mode) {
                         calculatedMaxTokens = Math.max(settings.max_output_tokens || 8192, baseTokensNeeded);
@@ -694,7 +699,7 @@ GUIDELINES:
                     ? 'Each description should be 4-6 sentences, providing rich detail and context.'
                     : 'Each description should be 2-3 sentences, concise but evocative.';
 
-                userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${settings.suggestions_count} distinct suggestions.\n${lengthInstruction}\nAlways follow the format specified in the system instructions exactly.\nIMPORTANT: Use PLAIN TEXT for titles - do NOT wrap titles in **asterisks**.\nDo NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${settings.suggestions_count} distinct suggestions.${userSuggestionsBlock}${lengthInstruction}\nAlways follow the format specified in the system instructions exactly.\nIMPORTANT: Use PLAIN TEXT for titles - do NOT wrap titles in **asterisks**.\nDo NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                 // Use the pre-calculated baseTokensNeeded (already calculated above)
                 if (settings.reasoning_mode) {
                     calculatedMaxTokens = Math.max(settings.max_output_tokens || 8192, baseTokensNeeded);
@@ -1769,12 +1774,11 @@ GUIDELINES:
         // 1. Regular Buttons
         jQuery(document).on(`click${eventNs}`, '.pw_cat_btn', function (e) {
             const category = jQuery(this).data('category');
-            if (category === 'director') {
-                e.stopPropagation();
-                showDirectorModal();
-                return;
-            }
-            openSuggestionsModal(category);
+            e.stopPropagation();
+            requestUserSuggestions(category, (userSuggestions) => {
+                if (category === 'director') showDirectorModal(userSuggestions);
+                else openSuggestionsModal(category, userSuggestions);
+            });
         });
 
         // 2. Dropdown Toggles
@@ -1808,7 +1812,7 @@ GUIDELINES:
             jQuery('.pw_dropdown_btn').removeClass('active');
 
             if (category) {
-                openSuggestionsModal(category);
+                requestUserSuggestions(category, (userSuggestions) => openSuggestionsModal(category, userSuggestions));
             }
         });
 
@@ -1826,9 +1830,9 @@ GUIDELINES:
             const category = this.value;
             if (category) {
                 if (category === 'director') {
-                    showDirectorModal();
+                    requestUserSuggestions(category, (userSuggestions) => showDirectorModal(userSuggestions));
                 } else {
-                    openSuggestionsModal(category);
+                    requestUserSuggestions(category, (userSuggestions) => openSuggestionsModal(category, userSuggestions));
                 }
                 this.selectedIndex = 0; // Reset
             }
@@ -1935,7 +1939,7 @@ GUIDELINES:
     // UI - SUGGESTIONS MODAL
     // ============================================================
 
-    function showDirectorModal() {
+    function showDirectorModal(userSuggestions = '') {
         // Remove existing modal to ensure fresh state and logic
         if (jQuery('#pw_director_modal').length) {
             jQuery('#pw_director_modal').remove();
@@ -2168,7 +2172,7 @@ GUIDELINES:
             suggestionsGenerated = true;
 
             // Trigger generation rendered into the results content container
-            generateSuggestions('director', true, directions, directorMode, jQuery('#pw_director_results_content'));
+            generateSuggestions('director', true, directions, directorMode, jQuery('#pw_director_results_content'), userSuggestions);
         });
 
         // Show
@@ -2201,7 +2205,7 @@ GUIDELINES:
         suggestionsModal = jQuery('#pw_suggestions_modal');
 
         jQuery('#pw_close_suggestions').on('click', closeSuggestionsModal);
-        jQuery('#pw_refresh_btn').on('click', () => generateSuggestions(currentCategory, true));
+        jQuery('#pw_refresh_btn').on('click', () => generateSuggestions(currentCategory, true, null, 'single_scene', null, currentUserSuggestions));
 
         suggestionsModal.on('click', (e) => {
             if (e.target === suggestionsModal[0]) closeSuggestionsModal();
@@ -2212,9 +2216,55 @@ GUIDELINES:
         });
     }
 
-    function openSuggestionsModal(category) {
+    function requestUserSuggestions(category, onSubmit) {
+        if (!settings.prompt_for_user_suggestions) {
+            onSubmit('');
+            return;
+        }
+
+        jQuery('#pw_user_suggestions_modal').remove();
+        const categoryName = getAllCategories()[category]?.name || 'Story Directions';
+        jQuery('body').append(`
+        <div class="pw_modal_overlay" id="pw_user_suggestions_modal">
+            <div class="pw_modal pw_user_suggestions_modal">
+                <div class="pw_modal_header">
+                    <h3 class="pw_modal_title"><i class="fa-solid fa-lightbulb"></i> Guide ${categoryName}</h3>
+                    <button class="pw_modal_close" id="pw_close_user_suggestions">&times;</button>
+                </div>
+                <div class="pw_modal_body">
+                    <p class="pw_user_suggestions_hint">Add an optional idea for the next scene. Pathweaver will use it as creative guidance while still generating varied suggestions.</p>
+                    <textarea id="pw_user_suggestions_input" class="text_pole" rows="5" placeholder="e.g. I want the next scene to reveal a dangerous secret, but keep the mood playful."></textarea>
+                    <div class="pw_user_suggestions_actions">
+                        <button class="pw_header_btn" id="pw_skip_user_suggestions">Continue without guidance</button>
+                        <button class="pw_header_btn primary" id="pw_submit_user_suggestions"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate</button>
+                    </div>
+                </div>
+            </div>
+        </div>`);
+
+        const modal = jQuery('#pw_user_suggestions_modal');
+        const close = () => modal.remove();
+        const submit = () => {
+            const userSuggestions = jQuery('#pw_user_suggestions_input').val().trim();
+            close();
+            onSubmit(userSuggestions);
+        };
+        jQuery('#pw_close_user_suggestions, #pw_skip_user_suggestions').on('click', () => {
+            close();
+            onSubmit('');
+        });
+        jQuery('#pw_submit_user_suggestions').on('click', submit);
+        modal.on('click', (e) => { if (e.target === modal[0]) close(); });
+        setTimeout(() => {
+            modal.addClass('active');
+            jQuery('#pw_user_suggestions_input').trigger('focus');
+        }, 10);
+    }
+
+    function openSuggestionsModal(category, userSuggestions = '') {
         createSuggestionsModal();
         currentCategory = category;
+        currentUserSuggestions = userSuggestions;
 
         const allCategories = getAllCategories();
         let catInfo = allCategories[category];
@@ -2229,7 +2279,7 @@ GUIDELINES:
             .addClass(`fa-solid ${catInfo?.icon || 'fa-compass'}`);
 
         suggestionsModal.addClass('active');
-        generateSuggestions(category);
+        generateSuggestions(category, false, null, 'single_scene', null, userSuggestions);
     }
 
     function closeSuggestionsModal() {
@@ -2549,6 +2599,13 @@ GUIDELINES:
                             </div>
                             <p class="pw_setting_hint pw_setting_stream_hint">
                                 Cards appear as each suggestion is generated. Works with Ollama and OpenAI-compatible APIs; Connection Profile may also support streaming.
+                            </p>
+                            <div class="pw_setting_row" style="margin-top: 12px;">
+                                <span class="pw_setting_label"><i class="fa-solid fa-lightbulb"></i> Ask for guidance before generating</span>
+                                <div class="pw_toggle ${settings.prompt_for_user_suggestions ? 'active' : ''}" data-setting="prompt_for_user_suggestions"></div>
+                            </div>
+                            <p class="pw_setting_hint">
+                                Opens an optional note field before every suggestion style. Leave it blank to generate normally.
                             </p>
                             
                             <!-- Reasoning Mode Settings -->
@@ -4187,6 +4244,7 @@ GUIDELINES:
         jQuery('#pw_include_persona').prop('checked', settings.include_persona);
         jQuery('#pw_include_authors_note').prop('checked', settings.include_authors_note);
         jQuery('#pw_stream_suggestions').prop('checked', settings.stream_suggestions);
+        jQuery('#pw_prompt_for_user_suggestions').prop('checked', settings.prompt_for_user_suggestions);
         // Reasoning mode settings
         jQuery('#pw_reasoning_mode').prop('checked', settings.reasoning_mode);
         jQuery('#pw_max_output_tokens').val(settings.max_output_tokens || 16384);
@@ -4426,6 +4484,12 @@ GUIDELINES:
             saveSettings();
             syncSettingsToModal();
             createActionBar();
+        });
+
+        jQuery('#pw_prompt_for_user_suggestions').on('change', function () {
+            settings.prompt_for_user_suggestions = this.checked;
+            saveSettings();
+            syncSettingsToModal();
         });
 
         // Insert mode

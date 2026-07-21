@@ -437,6 +437,10 @@
     max-width: 600px;
 }
 
+.pw_modal.pw_user_suggestions_modal {
+    max-width: 620px;
+}
+
 /* Style editor modal - wider */
 .pw_modal.pw_editor_modal {
     max-width: 800px;
@@ -536,6 +540,29 @@
     overflow-y: auto;
     overflow-x: hidden;
     background: var(--SmartThemeBlurTintColor, rgba(25, 25, 35, 0.95));
+}
+
+.pw_user_suggestions_hint {
+    margin: 0 0 12px;
+    color: var(--pw-text-secondary);
+    line-height: 1.45;
+}
+
+#pw_user_suggestions_input {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+    box-sizing: border-box;
+    padding: 10px;
+    color: var(--pw-text-primary);
+}
+
+.pw_user_suggestions_actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
 }
 
 /* Status/Loading Area - NO refresh button inside */
