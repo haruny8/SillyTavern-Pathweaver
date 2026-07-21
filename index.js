@@ -2359,9 +2359,31 @@ GUIDELINES:
         return text;
     }
 
-    function copyToClipboard(text) {
+    async function copyToClipboard(text) {
         const formatted = getFormattedSuggestion(text);
-        navigator.clipboard.writeText(formatted).then(() => showToast('Copied to clipboard!'));
+
+        try {
+            if (navigator.clipboard?.writeText && window.isSecureContext) {
+                await navigator.clipboard.writeText(formatted);
+                showToast('Copied to clipboard!');
+                return;
+            }
+        } catch (err) {
+            log('Clipboard API copy failed; using fallback:', err);
+        }
+
+        const textarea = document.createElement('textarea');
+        textarea.value = formatted;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        const copied = document.execCommand('copy');
+        textarea.remove();
+        showToast(copied ? 'Copied to clipboard!' : 'Could not copy to clipboard');
     }
 
     function insertSuggestion(suggestion) {
