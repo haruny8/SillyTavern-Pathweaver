@@ -127,6 +127,9 @@
         include_authors_note: false, // Include {{authorsNote}} in context
         custom_styles: [],
         style_visibility: {},       // Map of style id -> false when hidden from the main toolbar
+        show_director_btn: true,    // Show the Director button on the main toolbar
+        show_surprise_btn: true,    // Show the Surprise Me dropdown on the main toolbar
+        icon_only_dropdowns: false, // Hide text labels in Genre/Custom/Surprise dropdown menus, icons + tooltip only
         hide_animated_bar: false,
         surprise_depth_min: 2,      // minimum messages away (used for random range or fixed min)
         surprise_depth_max: 6,      // maximum messages away (used for random range or fixed max)
@@ -478,7 +481,7 @@ GUIDELINES:
             cleaned = cleaned.replace(/<[^>]*>/g, '');
             const txt = document.createElement('textarea');
             txt.innerHTML = cleaned;
-            return txt.value.substring(0, 10000);
+            return txt.value;
         };
 
         const depth = Math.max(1, Math.min(500, settings.context_depth || 4));
@@ -548,7 +551,7 @@ GUIDELINES:
             // Method 4: chatMetadata.worldInfo
             if (entries.length === 0 && stContext.chatMetadata?.worldInfo) processEntries(stContext.chatMetadata.worldInfo);
 
-            if (entries.length > 0) worldInfo = entries.slice(0, 10).join('\n\n');
+            if (entries.length > 0) worldInfo = entries.join('\n\n');
         } catch (err) {
             warn('Failed to extract World Info:', err);
         }
@@ -629,16 +632,16 @@ GUIDELINES:
             if (storyContext.characterInfo) contextBlock += `${storyContext.characterInfo}\n\n`;
             if (settings.include_scenario && storyContext.scenario) contextBlock += `Scenario: ${storyContext.scenario}\n\n`;
             if (settings.include_description && storyContext.description) {
-                contextBlock += `Character Description: ${storyContext.description.substring(0, 10000)}\n\n`;
+                contextBlock += `Character Description: ${storyContext.description}\n\n`;
             }
             if (settings.include_worldinfo && storyContext.worldInfo) {
-                contextBlock += `World Lore:\n${storyContext.worldInfo.substring(0, 10000)}\n\n`;
+                contextBlock += `World Lore:\n${storyContext.worldInfo}\n\n`;
             }
             if (settings.include_persona && storyContext.persona) {
-                contextBlock += `${userName}'s Persona: ${storyContext.persona.substring(0, 10000)}\n\n`;
+                contextBlock += `${userName}'s Persona: ${storyContext.persona}\n\n`;
             }
             if (settings.include_authors_note && storyContext.authorsNote) {
-                contextBlock += `Author's Note: ${storyContext.authorsNote.substring(0, 4000)}\n\n`;
+                contextBlock += `Author's Note: ${storyContext.authorsNote}\n\n`;
             }
             contextBlock += `[RECENT CONVERSATION HISTORY]:\n${storyContext.history}`;
 
@@ -663,7 +666,7 @@ GUIDELINES:
                 if (mode === 'story_beats') {
                     // Story Beats: 1 input = 1 suggestion (Classic behavior)
                     const dirList = customDirections.map((d, i) => `${i + 1}. ${d}`).join('\n');
-                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate exactly ${customDirections.length} suggestions, one for each of the following directions.\n\nUSER DIRECTIONS:\n${dirList}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- PREVENT BLEED: Each suggestion must be strictly isolated to its corresponding input beat. Do NOT combine events from different beats unless explicitly requested.\n- Follow the specific direction for each suggestion EXACTLY.\n- Keep titles punchy and plain text (no asterisks).\n- ${settings.suggestion_length === 'long' ? 'Write 4-6 sentences per suggestion.' : 'Write 2-3 sentences per suggestion.'}\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                    userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${customDirections.length} suggestions, one for each of the following directions.\n\nUSER DIRECTIONS:\n${dirList}\n\nFORMAT:\n[EMOJI] TITLE\nDESCRIPTION\n\nGUIDELINES:\n- PREVENT BLEED: Each suggestion must be strictly isolated to its corresponding input beat. Do NOT combine events from different beats unless explicitly requested.\n- Follow the specific direction for each suggestion EXACTLY.\n- Keep titles punchy and plain text (no asterisks).\n- ${settings.suggestion_length === 'long' ? 'Write 4-6 sentences per suggestion.' : 'Write 2-3 sentences per suggestion.'}\n- Do NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                     // Recalculate for director mode with custom directions
                     const dirTokensNeeded = customDirections.length * tokensPerSuggestion + 800;
                     if (settings.reasoning_mode) {
@@ -691,7 +694,7 @@ GUIDELINES:
                     ? 'Each description should be 4-6 sentences, providing rich detail and context.'
                     : 'Each description should be 2-3 sentences, concise but evocative.';
 
-                userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate exactly ${settings.suggestions_count} distinct suggestions.\n${lengthInstruction}\nFollow the format specified in the system instructions exactly.\nIMPORTANT: Use PLAIN TEXT for titles - do NOT wrap titles in **asterisks**.\nDo NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
+                userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate EXACTLY ${settings.suggestions_count} distinct suggestions.\n${lengthInstruction}\nAlways follow the format specified in the system instructions exactly.\nIMPORTANT: Use PLAIN TEXT for titles - do NOT wrap titles in **asterisks**.\nDo NOT include any preamble.${settings.stream_suggestions ? '\n\nSTREAMING: Output one complete suggestion at a time. Each suggestion MUST start with [EMOJI] TITLE then DESCRIPTION; end each with --- before the next. Do NOT repeat a title or copy content from one suggestion into another. Every suggestion is independent and self-contained.' : ''}`;
                 // Use the pre-calculated baseTokensNeeded (already calculated above)
                 if (settings.reasoning_mode) {
                     calculatedMaxTokens = Math.max(settings.max_output_tokens || 8192, baseTokensNeeded);
@@ -1542,7 +1545,7 @@ GUIDELINES:
             if (cat.nsfw && !settings.show_explicit) continue;
             const sIcon = allCategories[key]?.icon || cat.icon;
             surpriseItems += `
-                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}">
+                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}" title="${cat.name}">
                     <i class="fa-solid ${sIcon}"></i>
                     <span>${cat.name}</span>
                 </button>`;
@@ -1553,7 +1556,7 @@ GUIDELINES:
             if (cat.nsfw && !settings.show_explicit) continue;
             const sIcon = allCategories[key]?.icon || cat.icon;
             surpriseItems += `
-                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}">
+                <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${key}" title="${cat.name}">
                     <i class="fa-solid ${sIcon}"></i>
                     <span>${cat.name}</span>
                 </button>`;
@@ -1562,7 +1565,7 @@ GUIDELINES:
         if (settings.custom_styles?.length) {
             for (const style of settings.custom_styles) {
                 surpriseItems += `
-                    <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${style.id}">
+                    <button class="pw_dropdown_item pw_surprise_item" data-surprise-category="${style.id}" title="${style.name}">
                         <i class="fa-solid ${style.icon}"></i>
                         <span>${style.name}</span>
                     </button>`;
@@ -1580,7 +1583,7 @@ GUIDELINES:
                     <i class="fa-solid fa-wand-sparkles"></i>
                     ${surpriseIndicatorHtml}
                 </button>
-                <div class="pw_dropdown_menu pw_surprise_menu">
+                <div class="pw_dropdown_menu pw_surprise_menu${settings.icon_only_dropdowns ? ' pw_icon_only' : ''}">
                     <div class="pw_surprise_menu_header">
                         <i class="fa-solid fa-wand-sparkles"></i> Surprise Me
                         <span class="pw_setting_tooltip_icon" title="Surprise Me secretly injects an AI-generated suggestion into the chat context a set number of messages before it fires. Pick a style, and Pathweaver will quietly arm a hidden prompt. When the countdown hits, the suggestion appears naturally — like the story took an unexpected turn on its own.">?</span>
@@ -1603,16 +1606,20 @@ GUIDELINES:
         let builtinButtonsHtml = '';
 
         // Director Button (Special)
-        builtinButtonsHtml += `
-            <button class="pw_cat_btn pw_director_btn"
-                    data-category="director"
-                    data-name="Director"
-                    title="Director: Take control of the story">
-                <i class="fa-solid fa-clapperboard"></i>
-            </button>`;
+        if (settings.show_director_btn) {
+            builtinButtonsHtml += `
+                <button class="pw_cat_btn pw_director_btn"
+                        data-category="director"
+                        data-name="Director"
+                        title="Director: Take control of the story">
+                    <i class="fa-solid fa-clapperboard"></i>
+                </button>`;
+        }
 
         // Surprise Me dropdown — immediately after Director
-        builtinButtonsHtml += surpriseDropdownHtml;
+        if (settings.show_surprise_btn) {
+            builtinButtonsHtml += surpriseDropdownHtml;
+        }
 
         // Main Categories (Context, Twist, Character, Explicit)
         let categoryOptionsHtml = '<option value="director">Director Mode</option>';
@@ -1641,7 +1648,7 @@ GUIDELINES:
             for (const style of settings.custom_styles) {
                 if (!isStyleVisible(style.id)) continue;
                 customItems += `
-                    <button class="pw_dropdown_item" data-category="${style.id}">
+                    <button class="pw_dropdown_item" data-category="${style.id}" title="${style.name}">
                         <i class="fa-solid ${style.icon}"></i>
                         <span>${style.name}</span>
                     </button>`;
@@ -1654,7 +1661,7 @@ GUIDELINES:
                 <button class="pw_dropdown_btn" data-name="Custom Styles" title="Custom Styles">
                     <i class="fa-solid fa-layer-group"></i>
                 </button>
-                <div class="pw_dropdown_menu">
+                <div class="pw_dropdown_menu${settings.icon_only_dropdowns ? ' pw_icon_only' : ''}">
                     ${customItems}
                 </div>
             </div>` : '';
@@ -1671,7 +1678,7 @@ GUIDELINES:
             if (!isStyleVisible(key)) continue;
             const gIcon = allCategories[key]?.icon || cat.icon;
             genreItems += `
-                <button class="pw_dropdown_item" data-category="${key}">
+                <button class="pw_dropdown_item" data-category="${key}" title="${cat.name}">
                     <i class="fa-solid ${gIcon}"></i>
                     <span>${cat.name}</span>
                 </button>`;
@@ -1685,7 +1692,7 @@ GUIDELINES:
                  <button class="pw_dropdown_btn" data-name="Genres" title="Genres">
                     <i class="fa-solid fa-masks-theater"></i>
                 </button>
-                <div class="pw_dropdown_menu">
+                <div class="pw_dropdown_menu${settings.icon_only_dropdowns ? ' pw_icon_only' : ''}">
                     ${genreItems}
                 </div>
             </div>
@@ -2671,6 +2678,20 @@ GUIDELINES:
                                     </select>
                                 </div>
                             </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-clapperboard"></i> Show Director button</span>
+                                <div class="pw_toggle ${settings.show_director_btn ? 'active' : ''}" data-setting="show_director_btn"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-wand-sparkles"></i> Show Surprise Me button</span>
+                                <div class="pw_toggle ${settings.show_surprise_btn ? 'active' : ''}" data-setting="show_surprise_btn"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-icons"></i> Icon-only dropdown menus
+                                    <span class="pw_setting_tooltip_icon" title="Hides the text labels inside the Genre, Custom Styles, and Surprise Me dropdown menus, showing just the icons in a compact grid. Hover an icon to see its name.">?</span>
+                                </span>
+                                <div class="pw_toggle ${settings.icon_only_dropdowns ? 'active' : ''}" data-setting="icon_only_dropdowns"></div>
+                            </div>
                         </div>
 
                         <div class="pw_settings_section">
@@ -2770,6 +2791,9 @@ GUIDELINES:
                 createActionBar();
             }
             if (setting === 'show_explicit') createActionBar();
+            if (setting === 'show_director_btn' || setting === 'show_surprise_btn' || setting === 'icon_only_dropdowns') {
+                createActionBar();
+            }
             if (setting === 'hide_animated_bar') {
                 jQuery('.pw_action_bar').toggleClass('pw_hide_animated_bar', settings.hide_animated_bar);
             }
@@ -3758,13 +3782,13 @@ GUIDELINES:
         if (storyContext.characterInfo) contextBlock += `${storyContext.characterInfo}\n\n`;
         if (settings.include_scenario && storyContext.scenario) contextBlock += `Scenario: ${storyContext.scenario}\n\n`;
         if (settings.include_description && storyContext.description) {
-            contextBlock += `Character Description: ${storyContext.description.substring(0, 5000)}\n\n`;
+            contextBlock += `Character Description: ${storyContext.description}\n\n`;
         }
         if (settings.include_persona && storyContext.persona) {
-            contextBlock += `${userName}'s Persona: ${storyContext.persona.substring(0, 5000)}\n\n`;
+            contextBlock += `${userName}'s Persona: ${storyContext.persona}\n\n`;
         }
         if (settings.include_authors_note && storyContext.authorsNote) {
-            contextBlock += `Author's Note: ${storyContext.authorsNote.substring(0, 4000)}\n\n`;
+            contextBlock += `Author's Note: ${storyContext.authorsNote}\n\n`;
         }
         contextBlock += `[RECENT CONVERSATION HISTORY]:\n${storyContext.history}`;
 
@@ -4131,6 +4155,9 @@ GUIDELINES:
         jQuery('#pw_bar_height').val(settings.bar_height);
         jQuery('#pw_bar_title_font').val(settings.bar_title_font || 'default');
         applyTitleFontSelectDisplay(document.getElementById('pw_bar_title_font'));
+        jQuery('#pw_show_director_btn').prop('checked', settings.show_director_btn);
+        jQuery('#pw_show_surprise_btn').prop('checked', settings.show_surprise_btn);
+        jQuery('#pw_icon_only_dropdowns').prop('checked', settings.icon_only_dropdowns);
         // Context sources
         jQuery('#pw_include_scenario').prop('checked', settings.include_scenario);
         jQuery('#pw_include_description').prop('checked', settings.include_description);
@@ -4184,6 +4211,9 @@ GUIDELINES:
         jQuery('.pw_toggle[data-setting="show_explicit"]').toggleClass('active', settings.show_explicit);
         jQuery('.pw_toggle[data-setting="insert_mode"]').toggleClass('active', settings.insert_mode);
         jQuery('.pw_toggle[data-setting="hide_animated_bar"]').toggleClass('active', settings.hide_animated_bar);
+        jQuery('.pw_toggle[data-setting="show_director_btn"]').toggleClass('active', settings.show_director_btn);
+        jQuery('.pw_toggle[data-setting="show_surprise_btn"]').toggleClass('active', settings.show_surprise_btn);
+        jQuery('.pw_toggle[data-setting="icon_only_dropdowns"]').toggleClass('active', settings.icon_only_dropdowns);
 
         jQuery('.pw_toggle[data-setting="insert_type_enabled"]').toggleClass('active', settings.insert_type_enabled);
         if (settings.insert_type_enabled) jQuery('#pw_sm_insert_type_options').css('display', 'flex');
@@ -4347,6 +4377,30 @@ GUIDELINES:
         jQuery('#pw_bar_title_font').on('change', function () {
             settings.bar_title_font = this.value;
             applyTitleFontSelectDisplay(this);
+            saveSettings();
+            syncSettingsToModal();
+            createActionBar();
+        });
+
+        // Show Director button
+        jQuery('#pw_show_director_btn').on('change', function () {
+            settings.show_director_btn = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+            createActionBar();
+        });
+
+        // Show Surprise Me button
+        jQuery('#pw_show_surprise_btn').on('change', function () {
+            settings.show_surprise_btn = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+            createActionBar();
+        });
+
+        // Icon-only dropdown menus
+        jQuery('#pw_icon_only_dropdowns').on('change', function () {
+            settings.icon_only_dropdowns = this.checked;
             saveSettings();
             syncSettingsToModal();
             createActionBar();

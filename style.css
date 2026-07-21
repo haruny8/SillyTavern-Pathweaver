@@ -3118,6 +3118,51 @@
     height: 30px;
 }
 
+/* Icon-only dropdown mode — grid of icon buttons, no text labels.
+   The item's `title` attribute still provides the name on hover. */
+.pw_dropdown_menu.pw_icon_only {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+    gap: 4px;
+    min-width: 160px;
+}
+
+.pw_dropdown_menu.pw_icon_only.show {
+    display: grid !important;
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item {
+    flex-direction: column;
+    justify-content: center;
+    width: auto;
+    gap: 0;
+    padding: 8px 4px;
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item span {
+    display: none;
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item i {
+    width: auto;
+    font-size: 1.05rem;
+}
+
+.pw_dropdown_menu.pw_icon_only .pw_dropdown_item:hover {
+    padding-left: 4px;
+    /* Undo the text-mode hover shift since there's no label to make room for */
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Non-item chrome (headers, badges, "Clear all") in the Surprise menu should
+   keep spanning the full grid width instead of being squeezed into a cell. */
+.pw_dropdown_menu.pw_icon_only .pw_surprise_menu_header,
+.pw_dropdown_menu.pw_icon_only .pw_surprise_endless_badge,
+.pw_dropdown_menu.pw_icon_only .pw_surprise_active_info {
+    grid-column: 1 / -1;
+}
+
 /* ============================================================
    SURPRISE FEATURE
    ============================================================ */
