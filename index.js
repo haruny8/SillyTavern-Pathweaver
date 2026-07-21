@@ -640,7 +640,7 @@ GUIDELINES:
             if (settings.include_authors_note && storyContext.authorsNote) {
                 contextBlock += `Author's Note: ${storyContext.authorsNote.substring(0, 4000)}\n\n`;
             }
-            contextBlock += `Recent conversation:\n${storyContext.history}`;
+            contextBlock += `[RECENT CONVERSATION HISTORY]:\n${storyContext.history}`;
 
             let userPrompt = '';
             let calculatedMaxTokens = 0;
@@ -3766,7 +3766,7 @@ GUIDELINES:
         if (settings.include_authors_note && storyContext.authorsNote) {
             contextBlock += `Author's Note: ${storyContext.authorsNote.substring(0, 4000)}\n\n`;
         }
-        contextBlock += `Recent conversation:\n${storyContext.history}`;
+        contextBlock += `[RECENT CONVERSATION HISTORY]:\n${storyContext.history}`;
 
         const userPrompt = `[STORY CONTEXT]\n${contextBlock}\n\n[TASK]\nGenerate exactly ONE single, self-contained narrative event or development that could be secretly injected into this story. This will be used as a hidden system note that the AI will act upon at the right moment.\n\nWrite it as a concise system instruction (1-3 sentences) in the format:\n[System Note: <the secret event/development>]\n\nMake it specific, surprising, and narratively interesting. Do NOT include any preamble, explanation, or multiple options — just the single system note.`;
 
