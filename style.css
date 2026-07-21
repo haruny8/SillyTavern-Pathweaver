@@ -2299,6 +2299,19 @@
     color: var(--pw-danger);
 }
 
+.pw_style_item.pw_style_hidden {
+    opacity: 0.55;
+}
+
+.pw_style_item.pw_style_hidden .pw_style_type {
+    color: var(--pw-danger, #f87171);
+}
+
+.pw_toggle_visibility_btn.pw_style_hidden_toggle {
+    color: var(--pw-danger, #f87171);
+    border-color: var(--pw-danger, #f87171);
+}
+
 /* Editor View (Back of Flip) */
 .pw_editor_back_header {
     display: flex;

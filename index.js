@@ -123,7 +123,10 @@
         include_scenario: true,     // Include character scenario in context
         include_description: true,  // Include character description in context
         include_worldinfo: false,   // Include World Info lorebook in context
+        include_persona: false,     // Include {{persona}} (user persona description) in context
+        include_authors_note: false, // Include {{authorsNote}} in context
         custom_styles: [],
+        style_visibility: {},       // Map of style id -> false when hidden from the main toolbar
         hide_animated_bar: false,
         surprise_depth_min: 2,      // minimum messages away (used for random range or fixed min)
         surprise_depth_max: 6,      // maximum messages away (used for random range or fixed max)
@@ -234,6 +237,11 @@
         return buttons;
     }
 
+    /** Whether a style's button/entry should appear in the main toolbar (buttons, genre dropdown, custom dropdown, mobile select). */
+    function isStyleVisible(id) {
+        return settings.style_visibility?.[id] !== false;
+    }
+
     function getVisibleCategories() {
         const all = getAllCategories();
         const visible = {};
@@ -244,6 +252,39 @@
         }
 
         return visible;
+    }
+
+    // ============================================================
+    // MACRO HELPERS ({{persona}} / {{authorsNote}})
+    // ============================================================
+
+    /** Resolve the {{persona}} macro to the active user persona's description text. */
+    function getUserPersona() {
+        const ctx = SillyTavern.getContext();
+        try {
+            let expanded = '';
+            if (typeof ctx.substituteParams === 'function') {
+                expanded = ctx.substituteParams('{{persona}}');
+            } else if (typeof window.substituteParams === 'function') {
+                expanded = window.substituteParams('{{persona}}');
+            }
+            if (expanded && expanded !== '{{persona}}') return expanded;
+        } catch (_) { /* fall through to manual lookups */ }
+        try {
+            const pu = window.power_user;
+            if (pu) {
+                if (typeof pu.persona_description === 'string' && pu.persona_description) return pu.persona_description;
+                if (pu.personas && pu.persona && pu.personas[pu.persona]?.description) return pu.personas[pu.persona].description;
+                if (typeof pu.persona === 'string' && pu.persona.length > 30 && !pu.persona.endsWith('.json')) return pu.persona;
+            }
+        } catch (_) { /* no persona available */ }
+        return ctx.persona || ctx.userPersona || ctx.user_persona || '';
+    }
+
+    /** Resolve the {{authorsNote}} macro to the current chat's Author's Note text. */
+    function getAuthorsNote() {
+        const ctx = SillyTavern.getContext();
+        return ctx.chatMetadata?.note_prompt || ctx.authorsNote || ctx.authors_note || '';
     }
 
     // ============================================================
@@ -440,7 +481,7 @@ GUIDELINES:
             return txt.value.substring(0, 10000);
         };
 
-        const depth = Math.max(2, Math.min(10, settings.context_depth || 4));
+        const depth = Math.max(1, Math.min(500, settings.context_depth || 4));
         const recentMessages = chat.slice(-depth);
 
         const history = recentMessages.map(msg =>
@@ -451,6 +492,11 @@ GUIDELINES:
         let scenario = '';
         let description = '';
         let worldInfo = '';
+        let persona = '';
+        let authorsNote = '';
+
+        try { persona = getUserPersona() || ''; } catch (err) { warn('Failed to extract persona:', err); }
+        try { authorsNote = getAuthorsNote() || ''; } catch (err) { warn('Failed to extract Author\'s Note:', err); }
 
         if (stContext.characterId !== undefined && stContext.characters && stContext.characters[stContext.characterId]) {
             const char = stContext.characters[stContext.characterId];
@@ -513,6 +559,8 @@ GUIDELINES:
             scenario,
             description,
             worldInfo,
+            persona,
+            authorsNote,
             messageCount: recentMessages.length,
             chatId: stContext.chatId || Date.now()
         };
@@ -572,7 +620,9 @@ GUIDELINES:
             categoryPrompt = categoryPrompt
                 .replace(/{{char}}/g, charName)
                 .replace(/{{user}}/g, userName)
-                .replace(/{{model}}/g, charName); // some prompts use model as char alias
+                .replace(/{{model}}/g, charName) // some prompts use model as char alias
+                .replace(/{{persona}}/g, storyContext.persona || '')
+                .replace(/{{authorsNote}}/g, storyContext.authorsNote || '');
 
             let contextBlock = '';
 
@@ -583,6 +633,12 @@ GUIDELINES:
             }
             if (settings.include_worldinfo && storyContext.worldInfo) {
                 contextBlock += `World Lore:\n${storyContext.worldInfo.substring(0, 10000)}\n\n`;
+            }
+            if (settings.include_persona && storyContext.persona) {
+                contextBlock += `${userName}'s Persona: ${storyContext.persona.substring(0, 10000)}\n\n`;
+            }
+            if (settings.include_authors_note && storyContext.authorsNote) {
+                contextBlock += `Author's Note: ${storyContext.authorsNote.substring(0, 4000)}\n\n`;
             }
             contextBlock += `Recent conversation:\n${storyContext.history}`;
 
@@ -1563,6 +1619,7 @@ GUIDELINES:
 
         for (const [key, cat] of Object.entries(MAIN_CATEGORIES)) {
             if (cat.nsfw && !settings.show_explicit) continue;
+            if (!isStyleVisible(key)) continue;
             const bIcon = allCategories[key]?.icon || cat.icon;
 
             const btnHtml = `
@@ -1582,6 +1639,7 @@ GUIDELINES:
         if (settings.custom_styles?.length) {
             let customItems = '';
             for (const style of settings.custom_styles) {
+                if (!isStyleVisible(style.id)) continue;
                 customItems += `
                     <button class="pw_dropdown_item" data-category="${style.id}">
                         <i class="fa-solid ${style.icon}"></i>
@@ -1591,7 +1649,7 @@ GUIDELINES:
                 categoryOptionsHtml += `<option value="${style.id}">${style.name}</option>`;
             }
 
-            customDropdownHtml = `
+            customDropdownHtml = customItems ? `
             <div class="pw_dropdown_container">
                 <button class="pw_dropdown_btn" data-name="Custom Styles" title="Custom Styles">
                     <i class="fa-solid fa-layer-group"></i>
@@ -1599,7 +1657,7 @@ GUIDELINES:
                 <div class="pw_dropdown_menu">
                     ${customItems}
                 </div>
-            </div>`;
+            </div>` : '';
         }
 
         // 3. Genre Dropdown (Visual)
@@ -1610,6 +1668,7 @@ GUIDELINES:
 
         for (const [key, cat] of sortedGenres) {
             if (cat.nsfw && !settings.show_explicit) continue;
+            if (!isStyleVisible(key)) continue;
             const gIcon = allCategories[key]?.icon || cat.icon;
             genreItems += `
                 <button class="pw_dropdown_item" data-category="${key}">
@@ -2441,13 +2500,9 @@ GUIDELINES:
                             <div class="pw_setting_row">
                                 <span class="pw_setting_label"><i class="fa-solid fa-layer-group"></i> Context depth</span>
                                 <div class="pw_setting_control">
-                                    <select id="pw_sm_context" class="pw_select text_pole">
-                                        <option value="2" ${settings.context_depth == 2 ? 'selected' : ''}>2 messages</option>
-                                        <option value="4" ${settings.context_depth == 4 ? 'selected' : ''}>4 messages</option>
-                                        <option value="6" ${settings.context_depth == 6 ? 'selected' : ''}>6 messages</option>
-                                        <option value="8" ${settings.context_depth == 8 ? 'selected' : ''}>8 messages</option>
-                                        <option value="10" ${settings.context_depth == 10 ? 'selected' : ''}>10 messages</option>
-                                    </select>
+                                    <input id="pw_sm_context" type="number" class="text_pole" min="1" max="500" step="1"
+                                        value="${settings.context_depth || 4}" style="width: 90px;"
+                                        title="Number of recent chat messages to include as context">
                                 </div>
                             </div>
                             <div class="pw_setting_row">
@@ -2502,6 +2557,14 @@ GUIDELINES:
                             <div class="pw_setting_row">
                                 <span class="pw_setting_label"><i class="fa-solid fa-user"></i> Include Character Description</span>
                                 <div class="pw_toggle ${settings.include_description ? 'active' : ''}" data-setting="include_description"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-id-card"></i> Include Your Persona</span>
+                                <div class="pw_toggle ${settings.include_persona ? 'active' : ''}" data-setting="include_persona"></div>
+                            </div>
+                            <div class="pw_setting_row">
+                                <span class="pw_setting_label"><i class="fa-solid fa-note-sticky"></i> Include Author's Note</span>
+                                <div class="pw_toggle ${settings.include_authors_note ? 'active' : ''}" data-setting="include_authors_note"></div>
                             </div>
                             <div class="pw_setting_row" style="flex-wrap: wrap;">
                                 <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
@@ -2790,7 +2853,7 @@ GUIDELINES:
             syncSettingsToPanel();
         });
 
-        jQuery('#pw_sm_context').on('change', function () { settings.context_depth = parseInt(this.value) || 4; saveSettings(); syncSettingsToPanel(); });
+        jQuery('#pw_sm_context').on('change', function () { settings.context_depth = Math.max(1, Math.min(500, parseInt(this.value) || 4)); this.value = settings.context_depth; saveSettings(); syncSettingsToPanel(); });
 
         // Suggestion length
         jQuery('#pw_sm_suggestion_length').on('change', function () { settings.suggestion_length = this.value; saveSettings(); syncSettingsToPanel(); });
@@ -3079,21 +3142,32 @@ GUIDELINES:
         // getAllCategories() already merges builtin_icon_customizations so icons reflect saved overrides
         const allCats = getAllCategories();
 
+        const visibilityBtnHtml = (id) => {
+            const visible = isStyleVisible(id);
+            return `
+                <button class="pw_style_action_btn pw_toggle_visibility_btn${visible ? '' : ' pw_style_hidden_toggle'}"
+                        title="${visible ? 'Hide from toolbar' : 'Show in toolbar'}">
+                    <i class="fa-solid ${visible ? 'fa-eye' : 'fa-eye-slash'}"></i>
+                </button>`;
+        };
+
         // Built-in styles first
         for (const [key, cat] of Object.entries(MAIN_CATEGORIES)) {
             if (cat.nsfw && !settings.show_explicit) continue;
             const displayIcon = allCats[key]?.icon || cat.icon;
+            const hiddenClass = isStyleVisible(key) ? '' : ' pw_style_hidden';
 
             listContainer.append(`
-                <div class="pw_style_item builtin" data-style-id="${key}" data-builtin="true">
+                <div class="pw_style_item builtin${hiddenClass}" data-style-id="${key}" data-builtin="true">
                     <div class="pw_style_icon">
                         <i class="fa-solid ${displayIcon}"></i>
                     </div>
                     <div class="pw_style_info">
                         <div class="pw_style_name">${cat.name}</div>
-                        <div class="pw_style_type">Main Style</div>
+                        <div class="pw_style_type">Main Style${isStyleVisible(key) ? '' : ' &middot; Hidden from toolbar'}</div>
                     </div>
                     <div class="pw_style_actions">
+                        ${visibilityBtnHtml(key)}
                         <button class="pw_style_action_btn pw_edit_style_btn" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </button>
@@ -3106,17 +3180,19 @@ GUIDELINES:
         for (const [key, cat] of Object.entries(GENRE_CATEGORIES)) {
             if (cat.nsfw && !settings.show_explicit) continue;
             const displayIcon = allCats[key]?.icon || cat.icon;
+            const hiddenClass = isStyleVisible(key) ? '' : ' pw_style_hidden';
 
             listContainer.append(`
-                <div class="pw_style_item builtin" data-style-id="${key}" data-builtin="true">
+                <div class="pw_style_item builtin${hiddenClass}" data-style-id="${key}" data-builtin="true">
                     <div class="pw_style_icon">
                         <i class="fa-solid ${displayIcon}"></i>
                     </div>
                     <div class="pw_style_info">
                         <div class="pw_style_name">${cat.name}</div>
-                        <div class="pw_style_type">Genre Style</div>
+                        <div class="pw_style_type">Genre Style${isStyleVisible(key) ? '' : ' &middot; Hidden from toolbar'}</div>
                     </div>
                     <div class="pw_style_actions">
+                        ${visibilityBtnHtml(key)}
                         <button class="pw_style_action_btn pw_edit_style_btn" title="Edit">
                             <i class="fa-solid fa-pen"></i>
                         </button>
@@ -3128,16 +3204,18 @@ GUIDELINES:
         // Custom styles
         if (settings.custom_styles?.length) {
             settings.custom_styles.forEach(style => {
+                const hiddenClass = isStyleVisible(style.id) ? '' : ' pw_style_hidden';
                 listContainer.append(`
-                    <div class="pw_style_item custom" data-style-id="${style.id}" data-builtin="false">
+                    <div class="pw_style_item custom${hiddenClass}" data-style-id="${style.id}" data-builtin="false">
                         <div class="pw_style_icon">
                             <i class="fa-solid ${style.icon}"></i>
                         </div>
                         <div class="pw_style_info">
                             <div class="pw_style_name">${style.name}</div>
-                            <div class="pw_style_type">Custom Style</div>
+                            <div class="pw_style_type">Custom Style${isStyleVisible(style.id) ? '' : ' &middot; Hidden from toolbar'}</div>
                         </div>
                         <div class="pw_style_actions">
+                            ${visibilityBtnHtml(style.id)}
                             <button class="pw_style_action_btn pw_edit_style_btn" title="Edit">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
@@ -3170,6 +3248,23 @@ GUIDELINES:
             const styleId = item.data('style-id');
             const isBuiltin = String(item.data('builtin')) === 'true';
             openEditorView(styleId, false, isBuiltin);
+        });
+
+        // Toggle toolbar visibility from list
+        jQuery('#pw_style_list').on('click', '.pw_toggle_visibility_btn', function (e) {
+            e.stopPropagation();
+            const item = jQuery(this).closest('.pw_style_item');
+            const styleId = item.data('style-id');
+            if (!settings.style_visibility) settings.style_visibility = {};
+            const nowVisible = !isStyleVisible(styleId);
+            if (nowVisible) {
+                delete settings.style_visibility[styleId];
+            } else {
+                settings.style_visibility[styleId] = false;
+            }
+            saveSettings();
+            renderStylesList();
+            createActionBar();
         });
 
         // Delete style from list
@@ -3452,6 +3547,7 @@ GUIDELINES:
         settings.custom_styles = settings.custom_styles.filter(s => s.id !== styleId);
         delete promptCache[styleId];
         delete cachedSuggestions[styleId];
+        if (settings.style_visibility) delete settings.style_visibility[styleId];
         saveSettings();
         createActionBar();
         renderStylesList();
@@ -3654,13 +3750,21 @@ GUIDELINES:
         categoryPrompt = categoryPrompt
             .replace(/{{char}}/g, charName)
             .replace(/{{user}}/g, userName)
-            .replace(/{{model}}/g, charName);
+            .replace(/{{model}}/g, charName)
+            .replace(/{{persona}}/g, storyContext.persona || '')
+            .replace(/{{authorsNote}}/g, storyContext.authorsNote || '');
 
         let contextBlock = '';
         if (storyContext.characterInfo) contextBlock += `${storyContext.characterInfo}\n\n`;
         if (settings.include_scenario && storyContext.scenario) contextBlock += `Scenario: ${storyContext.scenario}\n\n`;
         if (settings.include_description && storyContext.description) {
             contextBlock += `Character Description: ${storyContext.description.substring(0, 5000)}\n\n`;
+        }
+        if (settings.include_persona && storyContext.persona) {
+            contextBlock += `${userName}'s Persona: ${storyContext.persona.substring(0, 5000)}\n\n`;
+        }
+        if (settings.include_authors_note && storyContext.authorsNote) {
+            contextBlock += `Author's Note: ${storyContext.authorsNote.substring(0, 4000)}\n\n`;
         }
         contextBlock += `Recent conversation:\n${storyContext.history}`;
 
@@ -4031,6 +4135,8 @@ GUIDELINES:
         jQuery('#pw_include_scenario').prop('checked', settings.include_scenario);
         jQuery('#pw_include_description').prop('checked', settings.include_description);
         jQuery('#pw_include_worldinfo').prop('checked', settings.include_worldinfo);
+        jQuery('#pw_include_persona').prop('checked', settings.include_persona);
+        jQuery('#pw_include_authors_note').prop('checked', settings.include_authors_note);
         jQuery('#pw_stream_suggestions').prop('checked', settings.stream_suggestions);
         // Reasoning mode settings
         jQuery('#pw_reasoning_mode').prop('checked', settings.reasoning_mode);
@@ -4104,6 +4210,8 @@ GUIDELINES:
         jQuery('.pw_toggle[data-setting="include_scenario"]').toggleClass('active', settings.include_scenario);
         jQuery('.pw_toggle[data-setting="include_description"]').toggleClass('active', settings.include_description);
         jQuery('.pw_toggle[data-setting="include_worldinfo"]').toggleClass('active', settings.include_worldinfo);
+        jQuery('.pw_toggle[data-setting="include_persona"]').toggleClass('active', settings.include_persona);
+        jQuery('.pw_toggle[data-setting="include_authors_note"]').toggleClass('active', settings.include_authors_note);
 
         // Reasoning mode settings
         jQuery('.pw_toggle[data-setting="reasoning_mode"]').toggleClass('active', settings.reasoning_mode);
@@ -4213,7 +4321,8 @@ GUIDELINES:
 
         // Context depth
         jQuery('#pw_context_depth').on('change', function () {
-            settings.context_depth = parseInt(this.value) || 4;
+            settings.context_depth = Math.max(1, Math.min(500, parseInt(this.value) || 4));
+            this.value = settings.context_depth;
             saveSettings();
             syncSettingsToModal();
         });
@@ -4353,6 +4462,20 @@ GUIDELINES:
         // Include World Info
         jQuery('#pw_include_worldinfo').on('change', function () {
             settings.include_worldinfo = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+        });
+
+        // Include Persona
+        jQuery('#pw_include_persona').on('change', function () {
+            settings.include_persona = this.checked;
+            saveSettings();
+            syncSettingsToModal();
+        });
+
+        // Include Author's Note
+        jQuery('#pw_include_authors_note').on('change', function () {
+            settings.include_authors_note = this.checked;
             saveSettings();
             syncSettingsToModal();
         });
