@@ -3172,10 +3172,10 @@
 /* Small + Compact is the dense toolbar preset. Keep these values after the
    responsive rules so the mobile 32px touch-target defaults cannot override it. */
 .pw_action_bar.pw_font_small.pw_height_compact {
-    min-height: 32px;
-    height: 32px;
-    padding: 2px 4px;
-    gap: 2px;
+    min-height: 36px;
+    height: 36px;
+    padding: 3px 6px;
+    gap: 4px;
 }
 
 .pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn,
