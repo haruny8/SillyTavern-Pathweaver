@@ -1520,7 +1520,7 @@
         display: flex;
         flex-wrap: wrap !important;
         overflow: visible !important;
-        gap: 4px !important;
+        gap: 6px !important;
         padding: 0;
         margin: 0;
         align-items: center;
@@ -3203,7 +3203,7 @@
 }
 
 .pw_action_bar.pw_font_small.pw_height_compact .pw_category_buttons {
-    gap: 2px;
+    gap: 4px;
 }
 
 @media (max-width: 768px) {
@@ -3243,10 +3243,11 @@
     }
 
     .pw_action_bar.pw_font_small.pw_height_compact {
-        min-height: 30px;
-        height: 30px;
+        min-height: 34px;
+        height: 34px;
         flex-wrap: nowrap;
         overflow: visible;
+        padding: 4px 8px;
     }
 
     .pw_action_bar.pw_font_small.pw_height_compact .pw_category_buttons {
