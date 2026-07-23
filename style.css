@@ -3181,10 +3181,10 @@
 .pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn,
 .pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn,
 .pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn {
-    width: 27px;
-    height: 27px;
-    min-width: 27px;
-    min-height: 27px;
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    min-height: 30px;
     margin: 0 2px;
     padding: 0;
 }
@@ -3192,7 +3192,7 @@
 .pw_action_bar.pw_font_small.pw_height_compact .pw_cat_btn i,
 .pw_action_bar.pw_font_small.pw_height_compact .pw_dropdown_btn i,
 .pw_action_bar.pw_font_small.pw_height_compact .pw_icon_btn i {
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .pw_action_bar.pw_font_small.pw_height_compact #pw_bar_settings {
